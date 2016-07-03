@@ -1,809 +1,470 @@
 #!/usr/bin/env lua
-do local sources, priorities = {}, {};assert(not sources["luacheck.check"])sources["luacheck.check"]=([===[-- <pack luacheck.check> --
-local parse = require "luacheck.parser"
-local linearize = require "luacheck.linearize"
-local analyze = require "luacheck.analyze"
-local reachability = require "luacheck.reachability"
-local handle_inline_options = require "luacheck.inline_options"
-local core_utils = require "luacheck.core_utils"
-local utils = require "luacheck.utils"
-
-local function is_secondary(value)
-   return value.secondaries and value.secondaries.used
-end
-
-local ChState = utils.class()
-
-function ChState:__init()
-   self.warnings = {}
-end
-
-function ChState:warn(warning, implicit_self)
-   if not warning.end_column then
-      warning.end_column = implicit_self and warning.column or (warning.column + #warning.name - 1)
-   end
-
-   table.insert(self.warnings, warning)
-end
-
-local action_codes = {
-   set = 1,
-   mutate = 2,
-   access = 3
-}
-
-local type_codes = {
-   var = 1,
-   func = 1,
-   arg = 2,
-   loop = 3,
-   loopi = 3
-}
-
-function ChState:warn_global(node, action, is_top)
-   self:warn({
-      code = "11" .. action_codes[action],
-      name = node[1],
-      line = node.location.line,
-      column = node.location.column,
-      top = is_top and (action == "set") or nil
-   })
-end
-
--- W12* (read-only global) and W131 (unused global) are patched in during filtering.
-
-function ChState:warn_unused_variable(var)
-   self:warn({
-      code = "21" .. type_codes[var.type],
-      name = var.name,
-      line = var.location.line,
-      column = var.location.column,
-      secondary = is_secondary(var.values[1]) or nil,
-      func = (var.values[1].type == "func") or nil,
-      self = var.self
-   }, var.self)
-end
-
-function ChState:warn_unset(var)
-   self:warn({
-      code = "221",
-      name = var.name,
-      line = var.location.line,
-      column = var.location.column
-   })
-end
-
-function ChState:warn_unaccessed(var)
-   -- Mark as secondary if all assigned values are secondary.
-   -- It is guaranteed that there are at least two values.
-   local secondary = true
-
-   for _, value in ipairs(var.values) do
-      if not value.empty and not is_secondary(value) then
-         secondary = nil
-         break
-      end
-   end
-
-   self:warn({
-      code = "23" .. type_codes[var.type],
-      name = var.name,
-      line = var.location.line,
-      column = var.location.column,
-      secondary = secondary
-   }, var.self)
-end
-
-function ChState:warn_unused_value(value)
-   self:warn({
-      code = "31" .. type_codes[value.type],
-      name = value.var.name,
-      line = value.location.line,
-      column = value.location.column,
-      secondary = is_secondary(value) or nil
-   }, value.type == "arg" and value.var.self)
-end
-
-function ChState:warn_uninit(node)
-   self:warn({
-      code = "321",
-      name = node[1],
-      line = node.location.line,
-      column = node.location.column
-   })
-end
-
-function ChState:warn_redefined(var, prev_var, same_scope)
-   if var.name ~= "..." then
-      self:warn({
-         code = "4" .. (same_scope and "1" or (var.line == prev_var.line and "2" or "3")) .. type_codes[prev_var.type],
-         name = var.name,
-         line = var.location.line,
-         column = var.location.column,
-         self = var.self and prev_var.self,
-         prev_line = prev_var.location.line,
-         prev_column = prev_var.location.column
-      }, var.self)
-   end
-end
-
-function ChState:warn_unreachable(location, unrepeatable, token)
-   self:warn({
-      code = "51" .. (unrepeatable and "2" or "1"),
-      line = location.line,
-      column = location.column,
-      end_column = location.column + #token - 1
-   })
-end
-
-function ChState:warn_unused_label(label)
-   self:warn({
-      code = "521",
-      name = label.name,
-      line = label.location.line,
-      column = label.location.column,
-      end_column = label.end_column
-   })
-end
-
-function ChState:warn_unbalanced(location, shorter_lhs)
-   -- Location points to `=`.
-   self:warn({
-      code = "53" .. (shorter_lhs and "1" or "2"),
-      line = location.line,
-      column = location.column,
-      end_column = location.column
-   })
-end
-
-function ChState:warn_empty_block(location, do_end)
-   -- Location points to `do`, `then` or `else`.
-   self:warn({
-      code = "54" .. (do_end and "1" or "2"),
-      line = location.line,
-      column = location.column,
-      end_column = location.column + (do_end and 1 or 3)
-   })
-end
-
-local function check_or_throw(src)
-   local ast, comments, code_lines = parse(src)
-   local chstate = ChState()
-   local line = linearize(chstate, ast)
-   analyze(chstate, line)
-   reachability(chstate, line)
-   handle_inline_options(ast, comments, code_lines, chstate.warnings)
-   core_utils.sort_by_location(chstate.warnings)
-   return chstate.warnings
-end
-
---- Checks source.
--- Returns an array of warnings and errors. Codes for errors start with "0".
--- Syntax errors (with code "011") have message stored in .msg field.
-local function check(src)
-   local warnings, err = utils.pcall(check_or_throw, src)
-
-   if warnings then
-      return warnings
-   else
-      local syntax_error = {
-         code = "011",
-         line = err.line,
-         column = err.column,
-         end_column = err.end_column,
-         msg = err.msg
-      }
-
-      return {syntax_error}
-   end
-end
-
-return check
-]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.config"])sources["luacheck.config"]=([===[-- <pack luacheck.config> --
-local options = require "luacheck.options"
-local stds = require "luacheck.stds"
+do --{{
+local sources, priorities = {}, {};assert(not sources["luacheck.version"],"module already exists")sources["luacheck.version"]=([===[-- <pack luacheck.version> --
+local luacheck = require "luacheck"
 local fs = require "luacheck.fs"
-local utils = require "luacheck.utils"
+local multithreading = require "luacheck.multithreading"
 
-local config = {}
+local version = {}
 
--- Config must support special metatables for some keys:
--- autovivification for `files`, fallback to built-in stds for `stds`.
+version.luacheck = luacheck._VERSION
 
-local special_mts = {
-   stds = {__index = stds},
-   files = {__index = function(files, key)
-      files[key] = {}
-      return files[key]
-   end}
-}
+if rawget(_G, "jit") then
+   version.lua = rawget(_G, "jit").version
+else
+   version.lua = _VERSION
+end
 
-local function make_config_env_mt()
-   local env_mt = {}
-   local special_values = {}
+if fs.has_lfs then
+   version.lfs = fs.lfs._VERSION
+else
+   version.lfs = "Not found"
+end
 
-   for key, mt in pairs(special_mts) do
-      special_values[key] = setmetatable({}, mt)
-   end
+if multithreading.has_lanes then
+   version.lanes = multithreading.lanes.ABOUT.version
+else
+   version.lanes = "Not found"
+end
 
-   function env_mt.__index(_, key)
-      if special_mts[key] then
-         return special_values[key]
-      else
-         return _G[key]
+version.string = ([[
+Luacheck: %s
+Lua: %s
+LuaFileSystem: %s
+LuaLanes: %s]]):format(version.luacheck, version.lua, version.lfs, version.lanes)
+
+return version
+]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
+assert(not sources["luacheck.utils"],"module already exists")sources["luacheck.utils"]=([===[-- <pack luacheck.utils> --
+local utils = {}
+
+utils.dir_sep = package.config:sub(1,1)
+utils.is_windows = utils.dir_sep == "\\"
+
+local bom = "\239\187\191"
+
+-- Returns all contents of file (path or file handler) or nil. 
+function utils.read_file(file)
+   local handler
+
+   if type(file) == "string" then
+      handler = io.open(file, "rb")
+
+      if not handler then
+         return nil
       end
+   else
+      handler = file
    end
 
-   function env_mt.__newindex(env, key, value)
-      if special_mts[key] then
-         if type(value) == "table" then
-            setmetatable(value, special_mts[key])
+   local res = handler:read("*a")
+   handler:close()
+
+   -- Use :len() instead of # operator because in some environments
+   -- string library is patched to handle UTF.
+   if res and res:sub(1, bom:len()) == bom then
+      res = res:sub(bom:len() + 1)
+   end
+
+   return res
+end
+
+-- luacheck: push
+-- luacheck: compat
+if _VERSION:find "5.1" then
+   -- Loads Lua source string in an environment, returns function or nil, error.
+   function utils.load(src, env, chunkname)
+      local func, err = loadstring(src, chunkname)
+
+      if func then
+         if env then
+            setfenv(func, env)
          end
 
-         special_values[key] = value
+         return func
       else
-         rawset(env, key, value)
+         return nil, err
       end
    end
-
-   return env_mt, special_values
-end
-
-local function make_config_env()
-   local mt, special_values = make_config_env_mt()
-   return setmetatable({}, mt), special_values
-end
-
-local function remove_env_mt(env, special_values)
-   setmetatable(env, nil)
-   utils.update(env, special_values)
-end
-
-local top_options = {
-   color = utils.has_type("boolean"),
-   codes = utils.has_type("boolean"),
-   formatter = utils.either(utils.has_type("string"), utils.has_type("function")),
-   cache = utils.either(utils.has_type("string"), utils.has_type("boolean")),
-   jobs = function(x) return type(x) == "number" and math.floor(x) == x and x >= 1 end,
-   files = utils.has_type("table"),
-   stds = utils.has_type("table"),
-   exclude_files = utils.array_of("string"),
-   include_files = utils.array_of("string")
-}
-
-utils.update(top_options, options.all_options)
-options.add_order(top_options)
-
--- Returns error or nil if options are valid.
-local function validate_options(option_set, opts)
-   local ok, invalid_field = options.validate(option_set, opts)
-
-   if not ok then
-      if invalid_field then
-         return ("invalid value of option '%s'"):format(invalid_field)
-      else
-         return "validation error"
-      end
+else
+   -- Loads Lua source string in an environment, returns function or nil, error.
+   function utils.load(src, env, chunkname)
+      return load(src, chunkname, "t", env or _ENV)
    end
 end
+-- luacheck: pop
 
--- Returns error or nil if config is valid.
-local function validate_config(conf)
-   local top_err = validate_options(top_options, conf)
-
-   if top_err then
-      return top_err
-   end
-
-   for path, opts in pairs(conf.files) do
-      if type(path) == "string" then
-         local override_err = validate_options(options.all_options, opts)
-
-         if override_err then
-            return ("%s in options for path '%s'"):format(override_err, path)
-         end
-      end
-   end
-end
-
--- Returns table with field `paths` containing sorted normalize paths
--- used in overrides and `options` mapping these paths to options.
-local function normalize_overrides(files, abs_conf_dir)
-   local overrides = {paths = {}, options = {}}
-
-   local orig_paths = {}
-
-   for path in pairs(files) do
-      table.insert(orig_paths, path)
-   end
-
-   table.sort(orig_paths)
-
-   for _, orig_path in ipairs(orig_paths) do
-      local path = fs.normalize(fs.join(abs_conf_dir, orig_path))
-
-      if not overrides.options[path] then
-         table.insert(overrides.paths, path)
-      end
-
-      overrides.options[path] = files[orig_path]
-   end
-
-   table.sort(overrides.paths)
-   return overrides
-end
-
-local function try_load(path)
+-- Loads config containing assignments to global variables from path. 
+-- Returns config table and return value of config or nil and error message
+-- ("I/O" or "syntax" or "runtime"). 
+function utils.load_config(path, env)
+   env = env or {}
    local src = utils.read_file(path)
 
    if not src then
-      return
+      return nil, "I/O"
    end
 
-   local func, err = utils.load(src, nil, "@"..path)
-   return err or func
+   local func = utils.load(src, env)
+
+   if not func then
+      return nil, "syntax"
+   end
+
+   local ok, res = pcall(func)
+
+   if not ok then
+      return nil, "runtime"
+   end
+
+   return env, res
 end
 
-local function add_relative_loader(conf)
-   local function loader(modname)
-      local modpath = fs.join(conf.rel_dir, modname:gsub("%.", utils.dir_sep))
-      return try_load(modpath..".lua") or try_load(modpath..utils.dir_sep.."init.lua"), modname
+function utils.array_to_set(array)
+   local set = {}
+
+   for index, value in ipairs(array) do
+      set[value] = index
    end
 
-   table.insert(package.loaders or package.searchers, 1, loader)
-   return loader
+   return set
 end
 
-local function remove_relative_loader(loader)
-   for i, func in ipairs(package.loaders or package.searchers) do
-      if func == loader then
-         table.remove(package.loaders or package.searchers, i)
-         return
-      end
-   end
-end
+function utils.concat_arrays(array)
+   local res = {}
 
-config.default_path = ".luacheckrc"
-config.empty_config = {empty = true}
-
--- Loads config from path, returns config object or nil and error message.
-function config.load_config(path)
-   local is_default_path = not path
-   path = path or config.default_path
-
-   local current_dir = fs.current_dir()
-   local abs_conf_dir, rel_conf_dir = fs.find_file(current_dir, path)
-
-   if not abs_conf_dir then
-      if is_default_path then
-         return config.empty_config
-      else
-         return nil, "Couldn't find configuration file "..path
-      end
-   end
-
-   local conf = {
-      abs_dir = abs_conf_dir,
-      rel_dir = rel_conf_dir,
-      cur_dir = current_dir
-   }
-
-   local conf_path = fs.join(rel_conf_dir, path)
-   local env, special_values = make_config_env()
-   local loader = add_relative_loader(conf)
-   local load_ok, ret = utils.load_config(conf_path, env)
-   remove_relative_loader(loader)
-
-   if not load_ok then
-      return nil, ("Couldn't load configuration from %s: %s error"):format(conf_path, ret)
-   end
-
-   -- Support returning some options from config instead of setting them as globals.
-   -- This allows easily loading options from another file, for example using require.
-   if type(ret) == "table" then
-      utils.update(env, ret)
-   end
-
-   remove_env_mt(env, special_values)
-
-   -- Update stds before validating config - std validation relies on that.
-   if type(env.stds) == "table" then
-      -- Ideally config shouldn't mutate global stds, not if `luacheck.config` becomes public
-      -- interface.
-      utils.update(stds, env.stds)
-   end
-
-   local err = validate_config(env)
-
-   if err then
-      return nil, ("Couldn't load configuration from %s: %s"):format(conf_path, err)
-   end
-
-   conf.options = env
-   conf.overrides = normalize_overrides(env.files, abs_conf_dir)
-   return conf
-end
-
--- Adjusts path starting from config dir to start from current directory.
-function config.relative_path(conf, path)
-   if conf.empty then
-      return path
-   else
-      return fs.join(conf.rel_dir, path)
-   end
-end
-
--- Requires module from config directory.
--- Returns success flag and module or error message.
-function config.relative_require(conf, modname)
-   local loader
-
-   if not conf.empty then
-      loader = add_relative_loader(conf)
-   end
-
-   local ok, mod_or_err = pcall(require, modname)
-
-   if not conf.empty then
-      remove_relative_loader(loader)
-   end
-
-   return ok, mod_or_err
-end
-
--- Returns top-level options.
-function config.get_top_options(conf)
-   return conf.empty and {} or conf.options
-end
-
--- Returns array of options for a file.
-function config.get_options(conf, file)
-   if conf.empty then
-      return {}
-   end
-
-   local res = {conf.options}
-
-   if type(file) ~= "string" then
-      return res
-   end
-
-   local path = fs.normalize(fs.join(conf.cur_dir, file))
-
-   for _, override_path in ipairs(conf.overrides.paths) do
-      if fs.is_subpath(override_path, path) then
-         table.insert(res, conf.overrides.options[override_path])
+   for _, subarray in ipairs(array) do
+      for _, item in ipairs(subarray) do
+         table.insert(res, item)
       end
    end
 
    return res
 end
 
-return config
-]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.options"])sources["luacheck.options"]=([===[-- <pack luacheck.options> --
-local options = {}
-
-local utils = require "luacheck.utils"
-local stds = require "luacheck.stds"
-
-local boolean = utils.has_type("boolean")
-local array_of_strings = utils.array_of("string")
-
-function options.split_std(std)
-   local parts = utils.split(std, "+")
-
-   if parts[1]:match("^%s*$") then
-      parts.add = true
-      table.remove(parts, 1)
+function utils.update(t1, t2)
+   for k, v in pairs(t2) do
+      t1[k] = v
    end
 
-   for i, part in ipairs(parts) do
-      parts[i] = utils.strip(part)
+   return t1
+end
 
-      if not stds[parts[i]] then
-         return
-      end
+local class_metatable = {}
+
+function class_metatable.__call(class, ...)
+   local obj = setmetatable({}, class)
+
+   if class.__init then
+      class.__init(obj, ...)
+   end
+
+   return obj
+end
+
+function utils.class()
+   local class = setmetatable({}, class_metatable)
+   class.__index = class
+   return class
+end
+
+utils.Stack = utils.class()
+
+function utils.Stack:__init()
+   self.size = 0
+end
+
+function utils.Stack:push(value)
+   self.size = self.size + 1
+   self[self.size] = value
+   self.top = value
+end
+
+function utils.Stack:pop()
+   local value = self[self.size]
+   self[self.size] = nil
+   self.size = self.size - 1
+   self.top = self[self.size]
+   return value
+end
+
+local function error_handler(err)
+   return {
+      err = err,
+      traceback = debug.traceback()
+   }
+end
+
+-- Calls f with arg, returns what it does.
+-- If f throws a table, returns nil, the table.
+-- If f throws not a table, rethrows.
+function utils.pcall(f, arg)
+   local function task()
+      return f(arg)
+   end
+
+   local ok, res = xpcall(task, error_handler)
+
+   if ok then
+      return res
+   elseif type(res.err) == "table" then
+      return nil, res.err
+   else
+      error(tostring(res.err) .. "\n" .. res.traceback, 0)
+   end
+end
+
+local function ripairs_iterator(array, i)
+   if i == 1 then
+      return nil
+   else
+      i = i - 1
+      return i, array[i]
+   end
+end
+
+function utils.ripairs(array)
+   return ripairs_iterator, array, #array + 1
+end
+
+function utils.after(str, pattern)
+   local _, last_matched_index = str:find(pattern)
+
+   if last_matched_index then
+      return str:sub(last_matched_index + 1)
+   end
+end
+
+function utils.strip(str)
+   local _, last_start_space = str:find("^%s*")
+   local first_end_space = str:find("%s*$")
+   return str:sub(last_start_space + 1, first_end_space - 1)
+end
+
+-- `sep` must be nil or a single character. Behaves like python's `str.split`.
+function utils.split(str, sep)
+   local parts = {}
+   local pattern
+
+   if sep then
+      pattern = sep .. "([^" .. sep .. "]*)"
+      str = sep .. str
+   else
+      pattern = "%S+"
+   end
+
+   for part in str:gmatch(pattern) do
+      table.insert(parts, part)
    end
 
    return parts
 end
 
-local function std_or_array_of_strings(x)
-   return array_of_strings(x) or (type(x) == "string" and options.split_std(x))
-end
+-- Behaves like string.match, except it normally returns boolean and
+-- throws a table {pattern = pattern} on invalid pattern.
+-- The error message turns into original error when tostring is used on it,
+-- to ensure behaviour is predictable when luacheck is used as a module.
+function utils.pmatch(str, pattern)
+   assert(type(str) == "string")
+   assert(type(pattern) == "string")
 
-function options.add_order(option_set)
-   local opts = {}
+   local ok, res = pcall(string.match, str, pattern)
 
-   for option in pairs(option_set) do
-      if type(option) == "string" then
-         table.insert(opts, option)
-      end
-   end
-
-   table.sort(opts)
-   utils.update(option_set, opts)
-end
-
-options.nullary_inline_options = {
-   global = boolean,
-   unused = boolean,
-   redefined = boolean,
-   unused_args = boolean,
-   unused_secondaries = boolean,
-   self = boolean,
-   compat = boolean,
-   allow_defined = boolean,
-   allow_defined_top = boolean,
-   module = boolean
-}
-
-options.variadic_inline_options = {
-   globals = array_of_strings,
-   read_globals = array_of_strings,
-   new_globals = array_of_strings,
-   new_read_globals = array_of_strings,
-   ignore = array_of_strings,
-   enable = array_of_strings,
-   only = array_of_strings
-}
-
-options.all_options = {
-   std = std_or_array_of_strings,
-   inline = boolean
-}
-
-utils.update(options.all_options, options.nullary_inline_options)
-utils.update(options.all_options, options.variadic_inline_options)
-options.add_order(options.all_options)
-
--- Returns true if opts is valid option_set.
--- Otherwise returns false and, optionally, name of the problematic option.
-function options.validate(option_set, opts)
-   if opts == nil then
-      return true
-   end
-
-   local ok, is_valid, invalid_opt = pcall(function()
-      assert(type(opts) == "table")
-
-      for _, option in ipairs(option_set) do
-         if opts[option] ~= nil then
-            if not option_set[option](opts[option]) then
-               return false, option
-            end
-         end
-      end
-
-      return true
-   end)
-
-   return ok and is_valid, invalid_opt
-end
-
--- Option stack is an array of options with options closer to end
--- overriding options closer to beginning.
-
--- Returns sets of std globals and read-only std globals from option stack.
--- Std globals can be set using compat option (sets std to stds.max) or std option.
--- If std is a table, array part contains read-only globals, hash part - regular globals as keys.
--- If it is a string, it must contain names of standard sets separated by +.
--- If prefixed with +, standard sets will be added on top of existing ones.
-local function get_std_sets(opts_stack)
-   local base_std
-   local add_stds = {}
-   local no_compat = false
-
-   for _, opts in utils.ripairs(opts_stack) do
-      if opts.compat and not no_compat then
-         base_std = "max"
-         break
-      elseif opts.compat == false then
-         no_compat = true
-      end
-
-      if opts.std then
-         if type(opts.std) == "table" then
-            base_std = opts.std
-            break
-         else
-            local parts = options.split_std(opts.std)
-
-            for _, part in ipairs(parts) do
-               table.insert(add_stds, part)
-            end
-
-            if not parts.add then
-               base_std = {}
-               break
-            end
-         end
-      end
-   end
-
-   table.insert(add_stds, base_std or "_G")
-
-   local std_globals = {}
-   local std_read_globals = {}
-
-   for _, add_std in ipairs(add_stds) do
-      add_std = stds[add_std] or add_std
-
-      for _, read_global in ipairs(add_std) do
-         std_read_globals[read_global] = true
-      end
-
-      for global in pairs(add_std) do
-         if type(global) == "string" then
-            std_globals[global] = true
-         end
-      end
-   end
-
-   return std_globals, std_read_globals
-end
-
-local function get_globals(opts_stack, key)
-   local globals_lists = {}
-
-   for _, opts in utils.ripairs(opts_stack) do
-      if opts["new_" .. key] then
-         table.insert(globals_lists, opts["new_" .. key])
-         break
-      end
-
-      if opts[key] then
-         table.insert(globals_lists, opts[key])
-      end
-   end
-
-   return utils.concat_arrays(globals_lists)
-end
-
-local function get_boolean_opt(opts_stack, option)
-   for _, opts in utils.ripairs(opts_stack) do
-      if opts[option] ~= nil then
-         return opts[option]
-      end
-   end
-end
-
-local function anchor_pattern(pattern, only_start)
-   if not pattern then
-      return
-   end
-
-   if pattern:sub(1, 1) == "^" or pattern:sub(-1) == "$" then
-      return pattern
+   if not ok then
+      error(setmetatable({pattern = pattern}, {__tostring = function() return res end}))
    else
-      return "^" .. pattern .. (only_start and "" or "$")
+      return not not res
    end
 end
 
--- Returns {pair of normalized patterns for code and name}.
--- `pattern` can be:
---    string containing '/': first part matches warning code, second - variable name;
---    string containing letters: matches variable name;
---    otherwise: matches warning code.
--- Unless anchored by user, pattern for name is anchored from both sides
--- and pattern for code is only anchored at the beginning.
-local function normalize_pattern(pattern)
-   local code_pattern, name_pattern
-   local slash_pos = pattern:find("/")
-
-   if slash_pos then
-      code_pattern = pattern:sub(1, slash_pos - 1)
-      name_pattern = pattern:sub(slash_pos + 1)
-   elseif pattern:find("[_a-zA-Z]") then
-      name_pattern = pattern
-   else
-      code_pattern = pattern
-   end
-
-   return {anchor_pattern(code_pattern, true), anchor_pattern(name_pattern)}
-end
-
--- From most specific to less specific, pairs {option, pattern}.
--- Applying macros in order is required to get deterministic resuls
--- and get sensible results when intersecting macros are used.
--- E.g. unused = false, unused_args = true should leave unused args enabled.
-local macros = {
-   {"unused_args", "21[23]"},
-   {"global", "1"},
-   {"unused", "[23]"},
-   {"redefined", "4"}
-}
-
--- Returns array of rules which should be applied in order.
--- A rule is a table {{pattern*}, type}.
--- `pattern` is a non-normalized pattern.
--- `type` can be "enable", "disable" or "only".
-local function get_rules(opts_stack)
-   local rules = {}
-   local used_macros = {}
-
-   for _, opts in utils.ripairs(opts_stack) do
-      for _, macro_info in ipairs(macros) do
-         local option, pattern = macro_info[1], macro_info[2]
-
-         if not used_macros[option] then
-            if opts[option] ~= nil then
-               table.insert(rules, {{pattern}, opts[option] and "enable" or "disable"})
-               used_macros[option] = true
-            end
-         end
-      end
-
-      if opts.ignore then
-         table.insert(rules, {opts.ignore, "disable"})
-      end
-
-      if opts.only then
-         table.insert(rules, {opts.only, "only"})
-      end
-
-      if opts.enable then
-         table.insert(rules, {opts.enable, "enable"})
-      end
-   end
-
-   return rules
-end
-
-local function normalize_patterns(rules)
+-- Maps func over array.
+function utils.map(func, array)
    local res = {}
 
-   for i, rule in ipairs(rules) do
-      res[i] = {{}, rule[2]}
-
-      for j, pattern in ipairs(rule[1]) do
-         res[i][1][j] = normalize_pattern(pattern)
-      end
+   for i, item in ipairs(array) do
+      res[i] = func(item)
    end
 
    return res
 end
 
--- Returns normalized options.
--- Normalized options have fields:
---    globals: set of strings;
---    read_globals: subset of globals;
---    unused_secondaries, module, allow_defined, allow_defined_top: booleans;
---    rules: see get_rules.
-function options.normalize(opts_stack)
-   local res = {}
-
-   res.globals = utils.array_to_set(get_globals(opts_stack, "globals"))
-   res.read_globals = utils.array_to_set(get_globals(opts_stack, "read_globals"))
-   local std_globals, std_read_globals = get_std_sets(opts_stack)
-   utils.update(res.globals, std_globals)
-   utils.update(res.read_globals, std_read_globals)
-
-   for k in pairs(res.globals) do
-      res.read_globals[k] = nil
+-- Returns predicate checking type.
+function utils.has_type(type_)
+   return function(x)
+      return type(x) == type_
    end
-
-   utils.update(res.globals, res.read_globals)
-
-   for i, option in ipairs {"unused_secondaries", "self", "inline", "module", "allow_defined", "allow_defined_top"} do
-      local value = get_boolean_opt(opts_stack, option)
-
-      if value == nil then
-         res[option] = i < 4
-      else
-         res[option] = value
-      end
-   end
-
-   res.rules = normalize_patterns(get_rules(opts_stack))
-   return res
 end
 
-return options
+-- Returns predicate checking that value is an array with
+-- elements of type.
+function utils.array_of(type_)
+   return function(x)
+      if type(x) ~= "table" then
+         return false
+      end
+
+      for _, item in ipairs(x) do
+         if type(item) ~= type_ then
+            return false
+         end
+      end
+
+      return true
+   end
+end
+
+-- Returns predicate chacking if value satisfies on of predicates.
+function utils.either(pred1, pred2)
+   return function(x)
+      return pred1(x) or pred2(x)
+   end
+end
+
+return utils
 ]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.parser"])sources["luacheck.parser"]=([===[-- <pack luacheck.parser> --
+assert(not sources["luacheck.stds"],"module already exists")sources["luacheck.stds"]=([===[-- <pack luacheck.stds> --
+local utils = require "luacheck.utils"
+
+local stds = {}
+
+stds.busted = {
+   "describe", "insulate", "expose", "it", "pending", "before_each", "after_each",
+   "lazy_setup", "lazy_teardown", "strict_setup", "strict_teardown", "setup", "teardown",
+   "context", "spec", "test", "assert", "spy", "mock", "stub", "finally"}
+
+stds.lua51 = {
+   _G = true, package = true, "_VERSION", "arg", "assert", "collectgarbage", "coroutine",
+   "debug", "dofile", "error", "gcinfo", "getfenv", "getmetatable", "io", "ipairs", "load",
+   "loadfile", "loadstring", "math", "module", "newproxy", "next", "os", "pairs", "pcall",
+   "print", "rawequal", "rawget", "rawset", "require", "select", "setfenv", "setmetatable",
+   "string", "table", "tonumber", "tostring", "type", "unpack", "xpcall"}
+
+stds.lua52 = {
+   _ENV = true, _G = true, package = true, "_VERSION", "arg", "assert", "bit32",
+   "collectgarbage", "coroutine", "debug", "dofile", "error", "getmetatable", "io", "ipairs",
+   "load", "loadfile", "math", "next", "os", "pairs", "pcall", "print", "rawequal", "rawget",
+   "rawlen", "rawset", "require", "select", "setmetatable", "string", "table", "tonumber",
+   "tostring", "type", "xpcall"}
+
+stds.lua52c = {
+   _ENV = true, _G = true, package = true, "_VERSION", "arg", "assert", "bit32",
+   "collectgarbage", "coroutine", "debug", "dofile", "error", "getmetatable", "io", "ipairs",
+   "load", "loadfile", "loadstring", "math", "module", "next", "os", "pairs", "pcall", "print",
+   "rawequal", "rawget", "rawlen", "rawset", "require", "select", "setmetatable", "string",
+   "table", "tonumber", "tostring", "type", "unpack", "xpcall"}
+
+stds.lua53 = {
+   _ENV = true, _G = true, package = true, "_VERSION", "arg", "assert", "collectgarbage",
+   "coroutine", "debug", "dofile", "error", "getmetatable", "io", "ipairs", "load", "loadfile",
+   "math", "next", "os", "pairs", "pcall", "print", "rawequal", "rawget", "rawlen", "rawset",
+   "require", "select", "setmetatable", "string", "table", "tonumber", "tostring", "type",
+   "utf8", "xpcall"}
+
+stds.lua53c = {
+   _ENV = true, _G = true, package = true, "_VERSION", "arg", "assert", "bit32",
+   "collectgarbage", "coroutine", "debug", "dofile", "error", "getmetatable", "io", "ipairs",
+   "load", "loadfile", "math", "next", "os", "pairs", "pcall", "print", "rawequal", "rawget",
+   "rawlen", "rawset", "require", "select", "setmetatable", "string", "table", "tonumber",
+   "tostring", "type", "utf8", "xpcall"}
+
+stds.luajit = {
+   _G = true, package = true, "_VERSION", "arg", "assert", "bit", "collectgarbage", "coroutine",
+   "debug", "dofile", "error", "gcinfo", "getfenv", "getmetatable", "io", "ipairs", "jit",
+   "load", "loadfile", "loadstring", "math", "module", "newproxy", "next", "os", "pairs",
+   "pcall", "print", "rawequal", "rawget", "rawset", "require", "select", "setfenv",
+   "setmetatable", "string", "table", "tonumber", "tostring", "type", "unpack", "xpcall"}
+
+local min = {_G = true, package = true}
+local std_sets = {}
+
+for name, std in pairs(stds) do
+   std_sets[name] = utils.array_to_set(std)
+end
+
+for global in pairs(std_sets.lua51) do
+   if std_sets.lua52[global] and std_sets.lua53[global] and std_sets.luajit[global] then
+      table.insert(min, global)
+   end
+end
+
+stds.min = min
+stds.max = utils.concat_arrays {stds.lua51, stds.lua52, stds.lua53, stds.luajit}
+stds.max._G = true
+stds.max._ENV = true
+stds.max.package = true
+
+stds._G = {}
+
+for global in pairs(_G) do
+   if global == "_G" or global == "package" then
+      stds._G[global] = true
+   else
+      table.insert(stds._G, global)
+   end
+end
+
+local function has_env()
+   local _ENV = {} -- luacheck: ignore
+   return not _G
+end
+
+if has_env() then
+   stds._G._ENV = true
+end
+
+stds.none = {}
+
+return stds
+]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
+assert(not sources["luacheck.reachability"],"module already exists")sources["luacheck.reachability"]=([===[-- <pack luacheck.reachability> --
+local core_utils = require "luacheck.core_utils"
+
+local reachability
+
+local function noop_callback() end
+
+local function reachability_callback(_, _, item, chstate)
+   if not item then
+      return true
+   end
+
+   if item.lines then
+      for _, subline in ipairs(item.lines) do
+         reachability(chstate, subline)
+      end
+   end
+
+   if item.accesses then
+      for var, accessing_nodes in pairs(item.accesses) do
+         local possible_values = item.used_values[var]
+
+         if not var.empty and (#possible_values == 1) and possible_values[1].empty then
+            for _, accessing_node in ipairs(accessing_nodes) do
+               chstate:warn_uninit(accessing_node)
+            end
+         end
+      end
+   end
+end
+
+-- Emits warnings: unreachable code, uninitialized access.
+function reachability(chstate, line)
+   local reachable_indexes = {}
+   core_utils.walk_line_once(line, reachable_indexes, 1, reachability_callback, chstate)
+
+   for i, item in ipairs(line.items) do
+      if not reachable_indexes[i] then
+         if item.location then
+            chstate:warn_unreachable(item.location, item.loop_end, item.token)
+            core_utils.walk_line_once(line, reachable_indexes, i, noop_callback)
+         end
+      end
+   end
+end
+
+return reachability
+]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
+assert(not sources["luacheck.parser"],"module already exists")sources["luacheck.parser"]=([===[-- <pack luacheck.parser> --
 local lexer = require "luacheck.lexer"
 local utils = require "luacheck.utils"
 
@@ -1484,101 +1145,575 @@ end
 
 return parse
 ]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.globbing"])sources["luacheck.globbing"]=([===[-- <pack luacheck.globbing> --
-local fs = require "luacheck.fs"
+assert(not sources["luacheck.options"],"module already exists")sources["luacheck.options"]=([===[-- <pack luacheck.options> --
+local options = {}
+
 local utils = require "luacheck.utils"
+local stds = require "luacheck.stds"
 
--- Only ?, *, ** and simple character classes (with ranges and negation) are supported.
--- Hidden files are not treated specially. Special characters can't be escaped.
-local globbing = {}
+local boolean = utils.has_type("boolean")
+local array_of_strings = utils.array_of("string")
 
-local cur_dir = fs.current_dir()
+function options.split_std(std)
+   local parts = utils.split(std, "+")
 
-local function is_regular_path(glob)
-   return not glob:find("[*?%[]")
-end
+   if parts[1]:match("^%s*$") then
+      parts.add = true
+      table.remove(parts, 1)
+   end
 
-local function get_parts(path)
-   local parts = {}
+   for i, part in ipairs(parts) do
+      parts[i] = utils.strip(part)
 
-   for part in path:gmatch("[^"..utils.dir_sep.."]+") do
-      table.insert(parts, part)
+      if not stds[parts[i]] then
+         return
+      end
    end
 
    return parts
 end
 
-local function glob_pattern_escaper(c)
-   return ((c == "*" or c == "?") and "." or "%")..c
+local function std_or_array_of_strings(x)
+   return array_of_strings(x) or (type(x) == "string" and options.split_std(x))
 end
 
-local function glob_range_escaper(c)
-   return c == "-" and c or ("%"..c)
-end
+function options.add_order(option_set)
+   local opts = {}
 
-local function glob_part_to_pattern(glob_part)
-   local buffer = {"^"}
-   local i = 1
-
-   while i <= #glob_part do
-      local bracketless
-      bracketless, i = glob_part:match("([^%[]*)()", i)
-      table.insert(buffer, (bracketless:gsub("%p", glob_pattern_escaper)))
-
-      if glob_part:sub(i, i) == "[" then
-         table.insert(buffer, "[")
-         i = i + 1
-         local first_char = glob_part:sub(i, i)
-
-         if first_char == "!" then
-            table.insert(buffer, "^")
-            i = i + 1
-         elseif first_char == "]" then
-            table.insert(buffer, "%]")
-            i = i + 1
-         end
-
-         bracketless, i = glob_part:match("([^%]]*)()", i)
-
-         if bracketless:sub(1, 1) == "-" then
-            table.insert(buffer, "%-")
-            bracketless = bracketless:sub(2)
-         end
-
-         local last_dash = ""
-
-         if bracketless:sub(-1) == "-" then
-            last_dash = "-"
-            bracketless = bracketless:sub(1, -2)
-         end
-
-         table.insert(buffer, (bracketless:gsub("%p", glob_range_escaper)))
-         table.insert(buffer, last_dash.."]")
-         i = i + 1
+   for option in pairs(option_set) do
+      if type(option) == "string" then
+         table.insert(opts, option)
       end
    end
 
-   table.insert(buffer, "$")
-   return table.concat(buffer)
+   table.sort(opts)
+   utils.update(option_set, opts)
 end
 
-local function part_match(glob_part, path_part)
-   return utils.pmatch(path_part, glob_part_to_pattern(glob_part))
-end
+options.nullary_inline_options = {
+   global = boolean,
+   unused = boolean,
+   redefined = boolean,
+   unused_args = boolean,
+   unused_secondaries = boolean,
+   self = boolean,
+   compat = boolean,
+   allow_defined = boolean,
+   allow_defined_top = boolean,
+   module = boolean
+}
 
-local function parts_match(glob_parts, glob_i, path_parts, path_i)
-   local glob_part = glob_parts[glob_i]
+options.variadic_inline_options = {
+   globals = array_of_strings,
+   read_globals = array_of_strings,
+   new_globals = array_of_strings,
+   new_read_globals = array_of_strings,
+   ignore = array_of_strings,
+   enable = array_of_strings,
+   only = array_of_strings
+}
 
-   if not glob_part then
-      -- Reached glob end, path matches the glob or its subdirectory.
-      -- E.g. path "foo/bar/baz/src.lua" matches glob "foo/*/baz".
+options.all_options = {
+   std = std_or_array_of_strings,
+   inline = boolean
+}
+
+utils.update(options.all_options, options.nullary_inline_options)
+utils.update(options.all_options, options.variadic_inline_options)
+options.add_order(options.all_options)
+
+-- Returns true if opts is valid option_set.
+-- Otherwise returns false and, optionally, name of the problematic option.
+function options.validate(option_set, opts)
+   if opts == nil then
       return true
    end
 
-   if glob_part == "**" then
-      -- "**" can consume any number of path parts.
-      for i = path_i, #path_parts + 1 do
-         if parts_match(glob_parts, glob_i + 1, path_parts, i) then
+   local ok, is_valid, invalid_opt = pcall(function()
+      assert(type(opts) == "table")
+
+      for _, option in ipairs(option_set) do
+         if opts[option] ~= nil then
+            if not option_set[option](opts[option]) then
+               return false, option
+            end
+         end
+      end
+
+      return true
+   end)
+
+   return ok and is_valid, invalid_opt
+end
+
+-- Option stack is an array of options with options closer to end
+-- overriding options closer to beginning.
+
+-- Returns sets of std globals and read-only std globals from option stack.
+-- Std globals can be set using compat option (sets std to stds.max) or std option.
+-- If std is a table, array part contains read-only globals, hash part - regular globals as keys.
+-- If it is a string, it must contain names of standard sets separated by +.
+-- If prefixed with +, standard sets will be added on top of existing ones.
+local function get_std_sets(opts_stack)
+   local base_std
+   local add_stds = {}
+   local no_compat = false
+
+   for _, opts in utils.ripairs(opts_stack) do
+      if opts.compat and not no_compat then
+         base_std = "max"
+         break
+      elseif opts.compat == false then
+         no_compat = true
+      end
+
+      if opts.std then
+         if type(opts.std) == "table" then
+            base_std = opts.std
+            break
+         else
+            local parts = options.split_std(opts.std)
+
+            for _, part in ipairs(parts) do
+               table.insert(add_stds, part)
+            end
+
+            if not parts.add then
+               base_std = {}
+               break
+            end
+         end
+      end
+   end
+
+   table.insert(add_stds, base_std or "_G")
+
+   local std_globals = {}
+   local std_read_globals = {}
+
+   for _, add_std in ipairs(add_stds) do
+      add_std = stds[add_std] or add_std
+
+      for _, read_global in ipairs(add_std) do
+         std_read_globals[read_global] = true
+      end
+
+      for global in pairs(add_std) do
+         if type(global) == "string" then
+            std_globals[global] = true
+         end
+      end
+   end
+
+   return std_globals, std_read_globals
+end
+
+local function get_globals(opts_stack, key)
+   local globals_lists = {}
+
+   for _, opts in utils.ripairs(opts_stack) do
+      if opts["new_" .. key] then
+         table.insert(globals_lists, opts["new_" .. key])
+         break
+      end
+
+      if opts[key] then
+         table.insert(globals_lists, opts[key])
+      end
+   end
+
+   return utils.concat_arrays(globals_lists)
+end
+
+local function get_boolean_opt(opts_stack, option)
+   for _, opts in utils.ripairs(opts_stack) do
+      if opts[option] ~= nil then
+         return opts[option]
+      end
+   end
+end
+
+local function anchor_pattern(pattern, only_start)
+   if not pattern then
+      return
+   end
+
+   if pattern:sub(1, 1) == "^" or pattern:sub(-1) == "$" then
+      return pattern
+   else
+      return "^" .. pattern .. (only_start and "" or "$")
+   end
+end
+
+-- Returns {pair of normalized patterns for code and name}.
+-- `pattern` can be:
+--    string containing '/': first part matches warning code, second - variable name;
+--    string containing letters: matches variable name;
+--    otherwise: matches warning code.
+-- Unless anchored by user, pattern for name is anchored from both sides
+-- and pattern for code is only anchored at the beginning.
+local function normalize_pattern(pattern)
+   local code_pattern, name_pattern
+   local slash_pos = pattern:find("/")
+
+   if slash_pos then
+      code_pattern = pattern:sub(1, slash_pos - 1)
+      name_pattern = pattern:sub(slash_pos + 1)
+   elseif pattern:find("[_a-zA-Z]") then
+      name_pattern = pattern
+   else
+      code_pattern = pattern
+   end
+
+   return {anchor_pattern(code_pattern, true), anchor_pattern(name_pattern)}
+end
+
+-- From most specific to less specific, pairs {option, pattern}.
+-- Applying macros in order is required to get deterministic resuls
+-- and get sensible results when intersecting macros are used.
+-- E.g. unused = false, unused_args = true should leave unused args enabled.
+local macros = {
+   {"unused_args", "21[23]"},
+   {"global", "1"},
+   {"unused", "[23]"},
+   {"redefined", "4"}
+}
+
+-- Returns array of rules which should be applied in order.
+-- A rule is a table {{pattern*}, type}.
+-- `pattern` is a non-normalized pattern.
+-- `type` can be "enable", "disable" or "only".
+local function get_rules(opts_stack)
+   local rules = {}
+   local used_macros = {}
+
+   for _, opts in utils.ripairs(opts_stack) do
+      for _, macro_info in ipairs(macros) do
+         local option, pattern = macro_info[1], macro_info[2]
+
+         if not used_macros[option] then
+            if opts[option] ~= nil then
+               table.insert(rules, {{pattern}, opts[option] and "enable" or "disable"})
+               used_macros[option] = true
+            end
+         end
+      end
+
+      if opts.ignore then
+         table.insert(rules, {opts.ignore, "disable"})
+      end
+
+      if opts.only then
+         table.insert(rules, {opts.only, "only"})
+      end
+
+      if opts.enable then
+         table.insert(rules, {opts.enable, "enable"})
+      end
+   end
+
+   return rules
+end
+
+local function normalize_patterns(rules)
+   local res = {}
+
+   for i, rule in ipairs(rules) do
+      res[i] = {{}, rule[2]}
+
+      for j, pattern in ipairs(rule[1]) do
+         res[i][1][j] = normalize_pattern(pattern)
+      end
+   end
+
+   return res
+end
+
+-- Returns normalized options.
+-- Normalized options have fields:
+--    globals: set of strings;
+--    read_globals: subset of globals;
+--    unused_secondaries, module, allow_defined, allow_defined_top: booleans;
+--    rules: see get_rules.
+function options.normalize(opts_stack)
+   local res = {}
+
+   res.globals = utils.array_to_set(get_globals(opts_stack, "globals"))
+   res.read_globals = utils.array_to_set(get_globals(opts_stack, "read_globals"))
+   local std_globals, std_read_globals = get_std_sets(opts_stack)
+   utils.update(res.globals, std_globals)
+   utils.update(res.read_globals, std_read_globals)
+
+   for k in pairs(res.globals) do
+      res.read_globals[k] = nil
+   end
+
+   utils.update(res.globals, res.read_globals)
+
+   for i, option in ipairs {"unused_secondaries", "self", "inline", "module", "allow_defined", "allow_defined_top"} do
+      local value = get_boolean_opt(opts_stack, option)
+
+      if value == nil then
+         res[option] = i < 4
+      else
+         res[option] = value
+      end
+   end
+
+   res.rules = normalize_patterns(get_rules(opts_stack))
+   return res
+end
+
+return options
+]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
+assert(not sources["luacheck.multithreading"],"module already exists")sources["luacheck.multithreading"]=([===[-- <pack luacheck.multithreading> --
+local utils = require "luacheck.utils"
+
+local multithreading = {}
+
+local ok, lanes = pcall(require, "lanes")
+ok = ok and pcall(lanes.configure)
+multithreading.has_lanes = ok
+multithreading.lanes = lanes
+
+if not ok then
+   return multithreading
+end
+
+-- Worker thread reads pairs {outkey, arg} from inkey channel of linda,
+-- applies func to arg and sends result to outkey channel of linda
+-- until arg is nil.
+local function worker_task(linda, inkey, func)
+   while true do
+      local _, pair = linda:receive(nil, inkey)
+      local outkey, arg = pair[1], pair[2]
+
+      if arg == nil then
+         return true
+      end
+
+      linda:send(nil, outkey, func(arg))
+   end
+end
+
+local worker_gen = lanes.gen("*", worker_task)
+
+-- Maps func over array, performing at most jobs calls in parallel.
+function multithreading.pmap(func, array, jobs)
+   jobs = math.min(jobs, #array)
+
+   if jobs < 2 then
+      return utils.map(func, array)
+   end
+
+   local workers = {}
+   local linda = lanes.linda()
+
+   for i = 1, jobs do
+      workers[i] = worker_gen(linda, 0, func)
+   end
+
+   for i, item in ipairs(array) do
+      linda:send(nil, 0, {i, item})
+   end
+
+   for _ = 1, jobs do
+      linda:send(nil, 0, {})
+   end
+
+   local results = {}
+
+   for i in ipairs(array) do
+      local _, result = linda:receive(nil, i)
+      results[i] = result
+   end
+
+   for _, worker in ipairs(workers) do
+      assert(worker:join())
+   end
+
+   return results
+end
+
+return multithreading
+]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
+assert(not sources["luacheck.main"],"module already exists")sources["luacheck.main"]=([===[-- <pack luacheck.main> --
+local luacheck = require "luacheck"
+local argparse = require "luacheck.argparse"
+local config = require "luacheck.config"
+local options = require "luacheck.options"
+local expand_rockspec = require "luacheck.expand_rockspec"
+local multithreading = require "luacheck.multithreading"
+local cache = require "luacheck.cache"
+local format = require "luacheck.format"
+local version = require "luacheck.version"
+local fs = require "luacheck.fs"
+local globbing = require "luacheck.globbing"
+local utils = require "luacheck.utils"
+
+local function critical(msg)
+   io.stderr:write("Critical error: "..msg.."\n")
+   os.exit(3)
+end
+
+local function global_error_handler(err)
+   if type(err) == "table" and err.pattern then
+      critical("Invalid pattern '" .. err.pattern .. "'")
+   else
+      critical(debug.traceback(
+         ("Luacheck %s bug (please report at github.com/mpeterv/luacheck/issues):\n%s"):format(luacheck._VERSION, err), 2))
+   end
+end
+
+local function main()
+   local default_cache_path = ".luacheckcache"
+
+   local function get_parser()
+      local parser = argparse("luacheck", "luacheck " .. luacheck._VERSION .. ", a simple static analyzer for Lua.", [[
+Links:
+
+   Luacheck on GitHub: https://github.com/mpeterv/luacheck
+   Luacheck documentation: http://luacheck.readthedocs.org]])
+
+      parser:argument "files"
+         :description (fs.has_lfs and [[List of files, directories and rockspecs to check.
+Pass "-" to check stdin.]] or [[List of files and rockspecs to check.
+Pass "-" to check stdin.]])
+         :args "+"
+         :argname "<file>"
+
+      parser:flag("-g --no-global", [[Filter out warnings related to global variables.
+Equivalent to --ignore 1.]])
+      parser:flag("-u --no-unused", [[Filter out warnings related to unused variables
+and values. Equivalent to --ignore [23].]])
+      parser:flag("-r --no-redefined", [[Filter out warnings related to redefined variables.
+Equivalent to --ignore 4.]])
+
+      parser:flag("-a --no-unused-args", [[Filter out warnings related to unused arguments and
+loop variables. Equivalent to --ignore 21[23].]])
+      parser:flag("-s --no-unused-secondaries", [[Filter out warnings related to unused variables set
+together with used ones.]])
+      parser:flag("--no-self", "Filter out warnings related to implicit self argument.")
+
+      parser:option("--std", [[Set standard globals. <std> can be one of:
+   _G (default) - globals of the current Lua
+      interpreter;
+   lua51 - globals of Lua 5.1;
+   lua52 - globals of Lua 5.2;
+   lua52c - globals of Lua 5.2 with LUA_COMPAT_ALL;
+   lua53 - globals of Lua 5.3;
+   lua53c - globals of Lua 5.3 with LUA_COMPAT_5_2;
+   luajit - globals of LuaJIT 2.0;
+   min - intersection of globals of Lua 5.1, Lua 5.2,
+      Lua 5.3 and LuaJIT 2.0;
+   max - union of globals of Lua 5.1, Lua 5.2, Lua 5.3
+      and LuaJIT 2.0;
+   busted - globals added by Busted 2.0;
+   none - no standard globals.
+
+   Sets can be combined using "+".]])
+      parser:option("--globals", "Add custom globals on top of standard ones.")
+         :args "*"
+         :count "*"
+         :argname "<global>"
+      parser:option("--read-globals", "Add read-only globals.")
+         :args "*"
+         :count "*"
+         :argname "<global>"
+      parser:option("--new-globals", [[Set custom globals. Removes custom globals added
+previously.]])
+         :args "*"
+         :count "*"
+         :argname "<global>"
+      parser:option("--new-read-globals", [[Set read-only globals. Removes read-only globals added
+previously.]])
+         :args "*"
+         :count "*"
+         :argname "<global>"
+      parser:flag("-c --compat", "Equivalent to --std max.")
+      parser:flag("-d --allow-defined", "Allow defining globals implicitly by setting them.")
+      parser:flag("-t --allow-defined-top", [[Allow defining globals implicitly by setting them in
+the top level scope.]])
+      parser:flag("-m --module", [[Limit visibility of implicitly defined globals to
+their files.]])
+
+      parser:option("--ignore -i", [[Filter out warnings matching these patterns.
+If a pattern contains slash, part before slash matches
+warning code and part after it matches name of related
+variable. Otherwise, if the pattern contains letters
+or underscore, it matches name of related variable.
+Otherwise, the pattern matches warning code.]])
+         :args "+"
+         :count "*"
+         :argname "<patt>"
+      parser:option("--enable -e", "Do not filter out warnings matching these patterns.")
+         :args "+"
+         :count "*"
+         :argname "<patt>"
+      parser:option("--only -o", "Filter out warnings not matching these patterns.")
+         :args "+"
+         :count "*"
+         :argname "<patt>"
+
+      parser:flag("--no-inline", "Disable inline options.")
+
+      parser:mutex(
+         parser:option("--config", "Path to configuration file. (default: "..config.default_path..")"),
+         parser:flag("--no-config", "Do not look up configuration file.")
+      )
+
+      parser:option("--filename", [[Use another filename in output and for selecting
+configuration overrides.]])
+
+      parser:option("--exclude-files", "Do not check files matching these globbing patterns.")
+         :args "+"
+         :count "*"
+         :argname "<glob>"
+      parser:option("--include-files", [[Do not check files not matching these globbing
+patterns.]])
+         :args "+"
+         :count "*"
+         :argname "<glob>"
+
+      if fs.has_lfs then
+         parser:mutex(
+            parser:option("--cache", "Path to cache file.", default_cache_path)
+               :defmode "arg",
+            parser:flag("--no-cache", "Do not use cache.")
+         )
+      end
+
+      if multithreading.has_lanes then
+         parser:option("-j --jobs", "Check <jobs> files in parallel.")
+            :convert(tonumber)
+      end
+
+      parser:option("--formatter" , [[Use custom formatter.
+<formatter> must be a module name or one of:
+   TAP - Test Anything Protocol formatter;
+   JUnit - JUnit XML formatter;
+   plain - simple warning-per-line formatter;
+   default - standard formatter.]])
+
+      parser:flag("-q --quiet", [[Suppress output for files without warnings.
+   -qq: Suppress output of warnings.
+   -qqq: Only print total number of warnings and
+      errors.]])
+         :count "0-3"
+
+      parser:flag("--codes", "Show warning codes.")
+      parser:flag("--ranges", "Show ranges of columns related to warnings.")
+      parser:flag("--no-color", "Do not color output.")
+
+      parser:flag("-v --version", "Show version info and exit.")
+         :action(function() print(version.string) os.exit(0) end)
+
+      return parser
+   end
+
+   local function match_any(globs, name)
+      for _, glob in ipairs(globs) do
+         if globbing.match(glob, name) then
             return true
          end
       end
@@ -1586,35 +1721,990 @@ local function parts_match(glob_parts, glob_i, path_parts, path_i)
       return false
    end
 
-   local path_part = path_parts[path_i]
-   return path_part and part_match(glob_part, path_part) and parts_match(glob_parts, glob_i + 1, path_parts, path_i + 1)
-end
-
--- Checks if a path matches a globbing pattern.
-function globbing.match(glob, path)
-   glob = fs.normalize(fs.join(cur_dir, glob))
-   path = fs.normalize(fs.join(cur_dir, path))
-
-   if is_regular_path(glob) then
-      return fs.is_subpath(glob, path)
+   local function is_included(args, name)
+      return not match_any(args.exclude_files, name) and (#args.include_files == 0 or match_any(args.include_files, name))
    end
 
-   local glob_base, path_base
-   glob_base, glob = fs.split_base(glob)
-   path_base, path = fs.split_base(path)
+   -- Expands folders, rockspecs, -
+   -- Returns new array of filenames and table mapping indexes of bad rockspecs to error messages.
+   -- Removes "./" in the beginnings of file names.
+   -- Filters filenames using args.exclude_files and args.include_files.
+   local function expand_files(args)
+      local res, bad_rockspecs = {}, {}
 
-   if glob_base ~= path_base then
-      return false
+      local function add(file)
+         if type(file) == "string" then
+            file = file:gsub("^./", "")
+         end
+
+         local name = args.filename or file
+
+         if type(name) == "string" then
+            if not is_included(args, name) then
+               return false
+            end
+         end
+
+         table.insert(res, file)
+         return true
+      end
+
+      for _, file in ipairs(args.files) do
+         if file == "-" then
+            add(io.stdin)
+         elseif fs.is_dir(file) then
+            for _, nested_file in ipairs(fs.extract_files(file, "%.lua$")) do
+               add(nested_file)
+            end
+         elseif file:sub(-#".rockspec") == ".rockspec" then
+            local related_files, err = expand_rockspec(file)
+
+            if related_files then
+               for _, related_file in ipairs(related_files) do
+                  add(related_file)
+               end
+            else
+               if add(file) then
+                  bad_rockspecs[#res] = err
+               end
+            end
+         else
+            add(file)
+         end
+      end
+
+      return res, bad_rockspecs
    end
 
-   local glob_parts = get_parts(glob)
-   local path_parts = get_parts(path)
-   return parts_match(glob_parts, 1, path_parts, 1)
+   local function validate_args(args, parser)
+      if args.jobs and args.jobs < 1 then
+         parser:error("<jobs> must be at least 1")
+      end
+
+      if args.std and not options.split_std(args.std) then
+         parser:error("<std> must name a standard library")
+      end
+   end
+
+   local function get_options(args)
+      local res = {}
+
+      for _, argname in ipairs {"allow_defined", "allow_defined_top", "module", "compat", "std"} do
+         if args[argname] then
+            res[argname] = args[argname]
+         end
+      end
+
+      for _, argname in ipairs {"global", "unused", "redefined", "unused", "unused_args",
+            "unused_secondaries", "self", "inline"} do
+         if args["no_"..argname] then
+            res[argname] = false
+         end
+      end
+
+      for _, argname in ipairs {"globals", "read_globals", "new_globals", "new_read_globals",
+            "ignore", "enable", "only"} do
+         if #args[argname] > 0 then
+            res[argname] = utils.concat_arrays(args[argname])
+         end
+      end
+
+      return res
+   end
+
+   local function combine_conf_and_args_path_arrays(conf, args, option)
+      local conf_opts = config.get_top_options(conf)
+
+      if conf_opts[option] then
+         for i, path in ipairs(conf_opts[option]) do
+            conf_opts[option][i] = config.relative_path(conf, path)
+         end
+
+         table.insert(args[option], conf_opts[option])
+      end
+
+      args[option] = utils.concat_arrays(args[option])
+   end
+
+   -- Applies cli-specific options from config to args.
+   local function combine_config_and_args(conf, args)
+      local conf_opts = config.get_top_options(conf)
+
+      if args.no_color then
+         args.color = false
+      else
+         args.color = conf_opts.color ~= false
+      end
+
+      args.codes = args.codes or conf_opts.codes
+      args.formatter = args.formatter or conf_opts.formatter or "default"
+
+      if args.no_cache or not fs.has_lfs then
+         args.cache = false
+      elseif not args.cache then
+         if type(conf_opts.cache) == "string" then
+            args.cache = config.relative_path(conf, conf_opts.cache)
+         else
+            args.cache = conf_opts.cache
+         end
+      end
+
+      if args.cache == true then
+         args.cache = config.relative_path(conf, default_cache_path)
+      end
+
+      args.jobs = args.jobs or conf_opts.jobs
+
+      combine_conf_and_args_path_arrays(conf, args, "exclude_files")
+      combine_conf_and_args_path_arrays(conf, args, "include_files")
+   end
+
+   -- Returns sparse array of mtimes and map of filenames to cached reports.
+   local function get_mtimes_and_cached_reports(cache_filename, files, bad_files)
+      local cache_files = {}
+      local cache_mtimes = {}
+      local sparse_mtimes = {}
+
+      for i, file in ipairs(files) do
+         if not bad_files[i] and file ~= io.stdin then
+            table.insert(cache_files, file)
+            local mtime = fs.mtime(file)
+            table.insert(cache_mtimes, mtime)
+            sparse_mtimes[i] = mtime
+         end
+      end
+
+      return sparse_mtimes, cache.load(cache_filename, cache_files, cache_mtimes) or critical(
+         ("Couldn't load cache from %s: data corrupted"):format(cache_filename))
+   end
+
+   -- Returns sparse array of sources of files that need to be checked, updates bad_files with files that had I/O issues.
+   local function get_srcs_to_check(cached_reports, files, bad_files)
+      local res = {}
+
+      for i, file in ipairs(files) do
+         if not bad_files[i] and not cached_reports[file] then
+            local src = utils.read_file(file)
+
+            if src then
+               res[i] = src
+            else
+               bad_files[i] = "I/O"
+            end
+         end
+      end
+
+      return res
+   end
+
+   -- Returns sparse array of new reports.
+   local function get_new_reports(files, srcs, jobs)
+      local dense_srcs = {}
+      local dense_to_sparse = {}
+
+      for i in ipairs(files) do
+         if srcs[i] then
+            table.insert(dense_srcs, srcs[i])
+            dense_to_sparse[#dense_srcs] = i
+         end
+      end
+
+      local map = jobs and multithreading.has_lanes and multithreading.pmap or utils.map
+      local dense_res = map(luacheck.get_report, dense_srcs, jobs)
+
+      local res = {}
+
+      for i in ipairs(dense_srcs) do
+         res[dense_to_sparse[i]] = dense_res[i]
+      end
+
+      return res
+   end
+
+   -- Updates cache with new_reports. Updates bad_files for which mtime is absent.
+   local function update_cache(cache_filename, files, bad_files, srcs, mtimes, new_reports)
+      local cache_files = {}
+      local cache_mtimes = {}
+      local cache_reports = {}
+
+      for i, file in ipairs(files) do
+         if srcs[i] and file ~= io.stdin then
+            if not mtimes[i] then
+               bad_files[i] = "I/O"
+            else
+               table.insert(cache_files, file)
+               table.insert(cache_mtimes, mtimes[i])
+               table.insert(cache_reports, new_reports[i] or false)
+            end
+         end
+      end
+
+      return cache.update(cache_filename, cache_files, cache_mtimes, cache_reports) or critical(
+         ("Couldn't save cache to %s: I/O error"):format(cache_filename))
+   end
+
+   -- Returns array of reports for files.
+   local function get_reports(cache_filename, files, bad_rockspecs, jobs)
+      local bad_files = utils.update({}, bad_rockspecs)
+      local mtimes
+      local cached_reports
+
+      if cache_filename then
+         mtimes, cached_reports = get_mtimes_and_cached_reports(cache_filename, files, bad_files)
+      else
+         cached_reports = {}
+      end
+
+      local srcs = get_srcs_to_check(cached_reports, files, bad_files)
+      local new_reports = get_new_reports(files, srcs, jobs)
+
+      if cache_filename then
+         update_cache(cache_filename, files, bad_files, srcs, mtimes, new_reports)
+      end
+
+      local res = {}
+
+      for i, file in ipairs(files) do
+         if bad_files[i] then
+            res[i] = {fatal = bad_files[i]}
+         else
+            res[i] = cached_reports[file] or new_reports[i]
+         end
+      end
+
+      return res
+   end
+
+   local function combine_config_and_options(conf, cli_opts, files)
+      local res = {}
+
+      for i, file in ipairs(files) do
+         res[i] = config.get_options(conf, file)
+         table.insert(res[i], cli_opts)
+      end
+
+      return res
+   end
+
+   local function substitute_filename(new_filename, files)
+      if new_filename then
+         for i = 1, #files do
+            files[i] = new_filename
+         end
+      end
+   end
+
+   local function normalize_stdin_in_filenames(files)
+      for i, file in ipairs(files) do
+         if type(file) ~= "string" then
+            files[i] = "stdin"
+         end
+      end
+   end
+
+   local builtin_formatters = utils.array_to_set({"TAP", "JUnit", "plain", "default"})
+
+   local function pformat(report, file_names, conf, args)
+      if builtin_formatters[args.formatter] then
+         return format.format(report, file_names, args)
+      end
+
+      local formatter = args.formatter
+      local ok, output
+
+      if type(formatter) == "string" then
+         ok, formatter = config.relative_require(conf, formatter)
+
+         if not ok then
+            critical(("Couldn't load custom formatter '%s': %s"):format(args.formatter, formatter))
+         end
+      end
+
+      ok, output = pcall(formatter, report, file_names, args)
+
+      if not ok then
+         critical(("Couldn't run custom formatter '%s': %s"):format(tostring(args.formatter), output))
+      end
+
+      return output
+   end
+
+   local parser = get_parser()
+   local args = parser:parse()
+   local opts = get_options(args)
+   local conf
+
+   if args.no_config then
+      conf = config.empty_config
+   else
+      local err
+      conf, err = config.load_config(args.config)
+
+      if not conf then
+         critical(err)
+      end
+   end
+
+   -- Validate args only after loading config so that custom stds are already in place.
+   validate_args(args, parser)
+   combine_config_and_args(conf, args)
+
+   local files, bad_rockspecs = expand_files(args)
+   local reports = get_reports(args.cache, files, bad_rockspecs, args.jobs)
+   substitute_filename(args.filename, files)
+   local report = luacheck.process_reports(reports, combine_config_and_options(conf, opts, files))
+   normalize_stdin_in_filenames(files)
+
+   local output = pformat(report, files, conf, args)
+
+   if #output > 0 and output:sub(-1) ~= "\n" then
+      output = output .. "\n"
+   end
+
+   io.stdout:write(output)
+
+   local exit_code
+
+   if report.fatals > 0 then
+      exit_code = 2
+   elseif report.warnings > 0 or report.errors > 0 then
+      exit_code = 1
+   else
+      exit_code = 0
+   end
+
+   os.exit(exit_code)
 end
 
-return globbing
+xpcall(main, global_error_handler)
 ]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.lexer"])sources["luacheck.lexer"]=([===[-- <pack luacheck.lexer> --
+assert(not sources["luacheck.linearize"],"module already exists")sources["luacheck.linearize"]=([===[-- <pack luacheck.linearize> --
+local lexer = require "luacheck.lexer"
+local utils = require "luacheck.utils"
+
+local pseudo_labels = utils.array_to_set({"do", "else", "break", "end", "return"})
+
+-- Who needs classes anyway.
+local function new_line()
+   return {
+      accessed_upvalues = {}, -- Maps variables to arrays of accessing items.
+      set_upvalues = {}, -- Maps variables to arays of setting items.
+      lines = {},
+      items = utils.Stack()
+   }
+end
+
+local function new_scope(line)
+   return {
+      vars = {},
+      labels = {},
+      gotos = {},
+      line = line
+   }
+end
+
+local function new_var(line, node, type_)
+   return {
+      name = node[1],
+      location = node.location,
+      type = type_,
+      self = node.implicit,
+      line = line,
+      scope_start = line.items.size + 1,
+      values = {}
+   }
+end
+
+local function new_value(var_node, value_node, is_init)
+   return {
+      var = var_node.var,
+      location = var_node.location,
+      type = value_node and value_node.tag == "Function" and "func" or (is_init and var_node.var.type or "var"),
+      initial = is_init,
+      empty = is_init and not value_node and (var_node.var.type == "var")
+   }
+end
+
+local function new_label(line, name, location, end_column)
+   return {
+      name = name,
+      location = location,
+      end_column = end_column,
+      index = line.items.size + 1
+   }
+end
+
+local function new_goto(name, jump, location)
+   return {
+      name = name,
+      jump = jump,
+      location = location
+   }
+end
+
+local function new_jump_item(is_conditional)
+   return {
+      tag = is_conditional and "Cjump" or "Jump"
+   }
+end
+
+local function new_eval_item(expr)
+   return {
+      tag = "Eval",
+      expr = expr,
+      location = expr.location,
+      token = expr.first_token,
+      accesses = {},
+      used_values = {},
+      lines = {}
+   }
+end
+
+local function new_noop_item(node, loop_end)
+   return {
+      tag = "Noop",
+      location = node.location,
+      token = node.first_token,
+      loop_end = loop_end
+   }
+end
+
+local function new_local_item(lhs, rhs, location, token)
+   return {
+      tag = "Local",
+      lhs = lhs,
+      rhs = rhs,
+      location = location,
+      token = token,
+      accesses = rhs and {},
+      used_values = rhs and {},
+      lines = rhs and {}
+   }
+end
+
+local function new_set_item(lhs, rhs, location, token)
+   return {
+      tag = "Set",
+      lhs = lhs,
+      rhs = rhs,
+      location = location,
+      token = token,
+      accesses = {},
+      used_values = {},
+      lines = {}
+   }
+end
+
+local function is_unpacking(node)
+   return node.tag == "Dots" or node.tag == "Call" or node.tag == "Invoke"
+end
+
+local LinState = utils.class()
+
+function LinState:__init(chstate)
+   self.chstate = chstate
+   self.lines = utils.Stack()
+   self.scopes = utils.Stack()
+end
+
+function LinState:enter_scope()
+   self.scopes:push(new_scope(self.lines.top))
+end
+
+function LinState:leave_scope()
+   local left_scope = self.scopes:pop()
+   local prev_scope = self.scopes.top
+
+   for _, goto_ in ipairs(left_scope.gotos) do
+      local label = left_scope.labels[goto_.name]
+
+      if label then
+         goto_.jump.to = label.index
+         label.used = true
+      else
+         if not prev_scope or prev_scope.line ~= self.lines.top then
+            if goto_.name == "break" then
+               lexer.syntax_error(goto_.location, goto_.location.column + 4, "'break' is not inside a loop")
+            else
+               lexer.syntax_error(goto_.location, goto_.location.column + 3, ("no visible label '%s'"):format(goto_.name))
+            end
+         end
+
+         table.insert(prev_scope.gotos, goto_)
+      end
+   end
+
+   for name, label in pairs(left_scope.labels) do
+      if not label.used and not pseudo_labels[name] then
+         self.chstate:warn_unused_label(label)
+      end
+   end
+
+   for _, var in pairs(left_scope.vars) do
+      var.scope_end = self.lines.top.items.size
+   end
+end
+
+function LinState:register_var(node, type_)
+   local var = new_var(self.lines.top, node, type_)
+   local prev_var = self:resolve_var(var.name)
+
+   if prev_var then
+      local same_scope = self.scopes.top.vars[var.name]
+      self.chstate:warn_redefined(var, prev_var, same_scope)
+
+      if same_scope then
+         prev_var.scope_end = self.lines.top.items.size
+      end
+   end
+
+   self.scopes.top.vars[var.name] = var
+   node.var = var
+   return var
+end
+
+function LinState:register_vars(nodes, type_)
+   for _, node in ipairs(nodes) do
+      self:register_var(node, type_)
+   end
+end
+
+function LinState:resolve_var(name)
+   for _, scope in utils.ripairs(self.scopes) do
+      local var = scope.vars[name]
+
+      if var then
+         return var
+      end
+   end
+end
+
+function LinState:check_var(node, action)
+   local var = self:resolve_var(node[1])
+
+   if not var then
+      self.chstate:warn_global(node, action, self.lines.size == 1)
+   else
+      node.var = var
+   end
+
+   return var
+end
+
+function LinState:register_label(name, location, end_column)
+   if self.scopes.top.labels[name] then
+      assert(not pseudo_labels[name])
+      lexer.syntax_error(location, end_column, ("label '%s' already defined on line %d"):format(
+         name, self.scopes.top.labels[name].location.line))
+   end
+
+   self.scopes.top.labels[name] = new_label(self.lines.top, name, location, end_column)
+end
+
+-- `node` is assignment node (`Local or `Set).
+function LinState:check_balance(node)
+   if node[2] then
+      if #node[1] < #node[2] then
+         self.chstate:warn_unbalanced(node.equals_location, true)
+      elseif (#node[1] > #node[2]) and node.tag ~= "Local" and not is_unpacking(node[2][#node[2]]) then
+         self.chstate:warn_unbalanced(node.equals_location)
+      end
+   end
+end
+
+function LinState:check_empty_block(block)
+   if #block == 0 then
+      self.chstate:warn_empty_block(block.location, block.tag == "Do")
+   end
+end
+
+function LinState:emit(item)
+   self.lines.top.items:push(item)
+end
+
+function LinState:emit_goto(name, is_conditional, location)
+   local jump = new_jump_item(is_conditional)
+   self:emit(jump)
+   table.insert(self.scopes.top.gotos, new_goto(name, jump, location))
+end
+
+local tag_to_boolean = {
+   Nil = false, False = false,
+   True = true, Number = true, String = true, Table = true, Function = true
+}
+
+-- Emits goto that jumps to ::name:: if bool(cond_node) == false.
+function LinState:emit_cond_goto(name, cond_node)
+   local cond_bool = tag_to_boolean[cond_node.tag]
+
+   if cond_bool ~= true then
+      self:emit_goto(name, cond_bool ~= false)
+   end
+end
+
+function LinState:emit_noop(node, loop_end)
+   self:emit(new_noop_item(node, loop_end))
+end
+
+function LinState:emit_stmt(stmt)
+   self["emit_stmt_" .. stmt.tag](self, stmt)
+end
+
+function LinState:emit_stmts(stmts)
+   for _, stmt in ipairs(stmts) do
+      self:emit_stmt(stmt)
+   end
+end
+
+function LinState:emit_block(block)
+   self:enter_scope()
+   self:emit_stmts(block)
+   self:leave_scope()
+end
+
+function LinState:emit_stmt_Do(node)
+   self:check_empty_block(node)
+   self:emit_noop(node)
+   self:emit_block(node)
+end
+
+function LinState:emit_stmt_While(node)
+   self:emit_noop(node)
+   self:enter_scope()
+   self:register_label("do")
+   self:emit_expr(node[1])
+   self:emit_cond_goto("break", node[1])
+   self:emit_block(node[2])
+   self:emit_noop(node, true)
+   self:emit_goto("do")
+   self:register_label("break")
+   self:leave_scope()
+end
+
+function LinState:emit_stmt_Repeat(node)
+   self:emit_noop(node)
+   self:enter_scope()
+   self:register_label("do")
+   self:enter_scope()
+   self:emit_stmts(node[1])
+   self:emit_expr(node[2])
+   self:leave_scope()
+   self:emit_cond_goto("do", node[2])
+   self:register_label("break")
+   self:leave_scope()
+end
+
+function LinState:emit_stmt_Fornum(node)
+   self:emit_noop(node)
+   self:emit_expr(node[2])
+   self:emit_expr(node[3])
+
+   if node[5] then
+      self:emit_expr(node[4])
+   end
+
+   self:enter_scope()
+   self:register_label("do")
+   self:emit_goto("break", true)
+   self:enter_scope()
+   self:emit(new_local_item({node[1]}))
+   self:register_var(node[1], "loopi")
+   self:emit_stmts(node[5] or node[4])
+   self:leave_scope()
+   self:emit_noop(node, true)
+   self:emit_goto("do")
+   self:register_label("break")
+   self:leave_scope()
+end
+
+function LinState:emit_stmt_Forin(node)
+   self:emit_noop(node)
+   self:emit_exprs(node[2])
+   self:enter_scope()
+   self:register_label("do")
+   self:emit_goto("break", true)
+   self:enter_scope()
+   self:emit(new_local_item(node[1]))
+   self:register_vars(node[1], "loop")
+   self:emit_stmts(node[3])
+   self:leave_scope()
+   self:emit_noop(node, true)
+   self:emit_goto("do")
+   self:register_label("break")
+   self:leave_scope()
+end
+
+function LinState:emit_stmt_If(node)
+   self:emit_noop(node)
+   self:enter_scope()
+
+   for i = 1, #node - 1, 2 do
+      self:enter_scope()
+      self:emit_expr(node[i])
+      self:emit_cond_goto("else", node[i])
+      self:check_empty_block(node[i + 1])
+      self:emit_block(node[i + 1])
+      self:emit_goto("end")
+      self:register_label("else")
+      self:leave_scope()
+   end
+
+   if #node % 2 == 1 then
+      self:check_empty_block(node[#node])
+      self:emit_block(node[#node])
+   end
+
+   self:register_label("end")
+   self:leave_scope()
+end
+
+function LinState:emit_stmt_Label(node)
+   self:register_label(node[1], node.location, node.end_column)
+end
+
+function LinState:emit_stmt_Goto(node)
+   self:emit_noop(node)
+   self:emit_goto(node[1], false, node.location)
+end
+
+function LinState:emit_stmt_Break(node)
+   self:emit_goto("break", false, node.location)
+end
+
+function LinState:emit_stmt_Return(node)
+   self:emit_noop(node)
+   self:emit_exprs(node)
+   self:emit_goto("return")
+end
+
+function LinState:emit_expr(node)
+   local item = new_eval_item(node)
+   self:scan_expr(item, node)
+   self:emit(item)
+end
+
+function LinState:emit_exprs(exprs)
+   for _, expr in ipairs(exprs) do
+      self:emit_expr(expr)
+   end
+end
+
+LinState.emit_stmt_Call = LinState.emit_expr
+LinState.emit_stmt_Invoke = LinState.emit_expr
+
+function LinState:emit_stmt_Local(node)
+   self:check_balance(node)
+   local item = new_local_item(node[1], node[2], node.location, node.first_token)
+   self:emit(item)
+
+   if node[2] then
+      self:scan_exprs(item, node[2])
+   end
+
+   self:register_vars(node[1], "var")
+end
+
+function LinState:emit_stmt_Localrec(node)
+   local item = new_local_item({node[1]}, {node[2]}, node.location, node.first_token)
+   self:register_var(node[1], "var")
+   self:emit(item)
+   self:scan_expr(item, node[2])
+end
+
+function LinState:emit_stmt_Set(node)
+   self:check_balance(node)
+   local item = new_set_item(node[1], node[2], node.location, node.first_token)
+   self:scan_exprs(item, node[2])
+
+   for _, expr in ipairs(node[1]) do
+      if expr.tag == "Id" then
+         local var = self:check_var(expr, "set")
+
+         if var then
+            self:register_upvalue_action(item, var, "set")
+         end
+      else
+         assert(expr.tag == "Index")
+
+         if expr[1].tag == "Id" and not self:resolve_var(expr[1][1]) then
+            -- Warn about mutated global.
+            self:check_var(expr[1], "mutate")
+         else
+            self:scan_expr(item, expr[1])
+         end
+
+         self:scan_expr(item, expr[2])
+      end
+   end
+
+   self:emit(item)
+end
+
+
+function LinState:scan_expr(item, node)
+   local scanner = self["scan_expr_" .. node.tag]
+
+   if scanner then
+      scanner(self, item, node)
+   end
+end
+
+function LinState:scan_exprs(item, nodes)
+   for _, node in ipairs(nodes) do
+      self:scan_expr(item, node)
+   end
+end
+
+function LinState:register_upvalue_action(item, var, action)
+   local key = (action == "set") and "set_upvalues" or "accessed_upvalues"
+
+   for _, line in utils.ripairs(self.lines) do
+      if line == var.line then
+         break
+      end
+
+      if not line[key][var] then
+         line[key][var] = {}
+      end
+
+      table.insert(line[key][var], item)
+   end
+end
+
+function LinState:mark_access(item, node)
+   node.var.accessed = true
+
+   if not item.accesses[node.var] then
+      item.accesses[node.var] = {}
+   end
+
+   table.insert(item.accesses[node.var], node)
+   self:register_upvalue_action(item, node.var, "access")
+end
+
+function LinState:scan_expr_Id(item, node)
+   if self:check_var(node, "access") then
+      self:mark_access(item, node)
+   end
+end
+
+function LinState:scan_expr_Dots(item, node)
+   local dots = self:check_var(node, "access")
+
+   if not dots or dots.line ~= self.lines.top then
+      lexer.syntax_error(node.location, node.location.column + 2, "cannot use '...' outside a vararg function")
+   end
+
+   self:mark_access(item, node)
+end
+
+LinState.scan_expr_Index = LinState.scan_exprs
+LinState.scan_expr_Call = LinState.scan_exprs
+LinState.scan_expr_Invoke = LinState.scan_exprs
+LinState.scan_expr_Paren = LinState.scan_exprs
+LinState.scan_expr_Pair = LinState.scan_exprs
+LinState.scan_expr_Table = LinState.scan_exprs
+
+function LinState:scan_expr_Op(item, node)
+   self:scan_expr(item, node[2])
+
+   if node[3] then
+      self:scan_expr(item, node[3])
+   end
+end
+
+-- Puts tables {var = value{} into field `set_variables` of items in line which set values.
+-- Registers set values in field `values` of variables.
+function LinState:register_set_variables()
+   local line = self.lines.top
+
+   for _, item in ipairs(line.items) do
+      if item.tag == "Local" or item.tag == "Set" then
+         item.set_variables = {}
+
+         local is_init = item.tag == "Local"
+         local unpacking_item -- Rightmost item of rhs which may unpack into several lhs items.
+
+         if item.rhs then
+            local last_rhs_item = item.rhs[#item.rhs]
+
+            if is_unpacking(last_rhs_item) then
+               unpacking_item = last_rhs_item
+            end
+         end
+
+         local secondaries -- Array of values unpacked from rightmost rhs item.
+
+         if unpacking_item and (#item.lhs > #item.rhs) then
+            secondaries = {}
+         end
+
+         for i, node in ipairs(item.lhs) do
+            local value
+
+            if node.var then
+               value = new_value(node, item.rhs and item.rhs[i] or unpacking_item, is_init)
+               item.set_variables[node.var] = value
+               table.insert(node.var.values, value)
+            end
+
+            if secondaries and (i >= #item.rhs) then
+               if value then
+                  value.secondaries = secondaries
+                  table.insert(secondaries, value)
+               else
+                  -- If one of secondary values is assigned to a global or index,
+                  -- it is considered used.
+                  secondaries.used = true
+               end
+            end
+         end
+      end
+   end
+end
+
+function LinState:build_line(args, block)
+   self.lines:push(new_line())
+   self:enter_scope()
+   self:emit(new_local_item(args))
+   self:enter_scope()
+   self:register_vars(args, "arg")
+   self:emit_stmts(block)
+   self:leave_scope()
+   self:register_label("return")
+   self:leave_scope()
+   self:register_set_variables()
+   local line = self.lines:pop()
+
+   for _, prev_line in ipairs(self.lines) do
+      table.insert(prev_line.lines, line)
+   end
+
+   return line
+end
+
+function LinState:scan_expr_Function(item, node)
+   local line = self:build_line(node[1], node[2])
+   table.insert(item.lines, line)
+
+   for _, nested_line in ipairs(line.lines) do
+      table.insert(item.lines, nested_line)
+   end
+end
+
+-- Builds linear representation of AST and returns it.
+-- Emits warnings: global, redefined/shadowed, unused label, unbalanced assignment, empty block.
+local function linearize(chstate, ast)
+   local linstate = LinState(chstate)
+   local line = linstate:build_line({{tag = "Dots", "..."}}, ast)
+   assert(linstate.lines.size == 0)
+   assert(linstate.scopes.size == 0)
+   return line
+end
+
+return linearize
+]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
+assert(not sources["luacheck.lexer"],"module already exists")sources["luacheck.lexer"]=([===[-- <pack luacheck.lexer> --
 local utils = require "luacheck.utils"
 
 -- Lexer should support syntax of Lua 5.1, Lua 5.2, Lua 5.3 and LuaJIT(64bit and complex cdata literals).
@@ -2336,1239 +3426,7 @@ end
 
 return lexer
 ]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.fs"])sources["luacheck.fs"]=([===[-- <pack luacheck.fs> --
-local fs = {}
-
-local utils = require "luacheck.utils"
-
-fs.has_lfs, fs.lfs = pcall(require, "lfs")
-
-local function ensure_dir_sep(path)
-   if path:sub(-1) ~= utils.dir_sep then
-      return path .. utils.dir_sep
-   end
-
-   return path
-end
-
-if utils.is_windows then
-   function fs.split_base(path)
-      if path:match("^%a:\\") then
-         return path:sub(1, 3), path:sub(4)
-      else
-         -- Disregard UNC stuff for now.
-         return "", path
-      end
-   end
-else
-   function fs.split_base(path)
-      if path:match("^/") then
-         if path:match("^//") then
-            return "//", path:sub(3)
-         else
-            return "/", path:sub(2)
-         end
-      else
-         return "", path
-      end
-   end
-end
-
-local function is_absolute(path)
-   return fs.split_base(path) ~= ""
-end
-
-function fs.normalize(path)
-   local base, rest = fs.split_base(path)
-   rest = rest:gsub("[/\\]", utils.dir_sep)
-
-   local parts = {}
-
-   for part in rest:gmatch("[^"..utils.dir_sep.."]+") do
-      if part ~= "." then
-         if part == ".." and #parts > 0 and parts[#parts] ~= ".." then
-            parts[#parts] = nil
-         else
-            parts[#parts + 1] = part
-         end
-      end
-   end
-
-   if base == "" and #parts == 0 then
-      return "."
-   else
-      return base..table.concat(parts, utils.dir_sep)
-   end
-end
-
-function fs.join(base, path)
-   if base == "" or is_absolute(path) then
-      return path
-   else
-      return ensure_dir_sep(base)..path
-   end
-end
-
-function fs.is_subpath(path, subpath)
-   local base1, rest1 = fs.split_base(path)
-   local base2, rest2 = fs.split_base(subpath)
-
-   if base1 ~= base2 then
-      return false
-   end
-
-   if rest2:sub(1, #rest1) ~= rest1 then
-      return false
-   end
-
-   return rest1 == rest2 or rest2:sub(#rest1 + 1, #rest1 + 1) == utils.dir_sep
-end
-
--- Searches for file starting from path, going up until the file
--- is found or root directory is reached.
--- Path must be absolute.
--- Returns absolute and relative paths to directory containing file or nil.
-function fs.find_file(path, file)
-   if is_absolute(file) then
-      return fs.is_file(file) and path, ""
-   end
-
-   path = fs.normalize(path)
-   local base, rest = fs.split_base(path)
-   local rel_path = ""
-
-   while true do
-      if fs.is_file(fs.join(base..rest, file)) then
-         return base..rest, rel_path
-      elseif rest == "" then
-         break
-      end
-
-      rest = rest:match("^(.*)"..utils.dir_sep..".*$") or ""
-      rel_path = rel_path..".."..utils.dir_sep
-   end
-end
-
-if not fs.has_lfs then
-   function fs.is_dir(_)
-      return false
-   end
-
-   function fs.is_file(path)
-      local fh = io.open(path)
-
-      if fh then
-         fh:close()
-         return true
-      else
-         return false
-      end
-   end
-
-   function fs.extract_files(_, _)
-      return {}
-   end
-
-   function fs.mtime(_)
-      return 0
-   end
-
-   local pwd_command = utils.is_windows and "cd" or "pwd"
-
-   function fs.current_dir()
-      local fh = io.popen(pwd_command)
-      local current_dir = fh:read("*a")
-      fh:close()
-      -- Remove extra newline at the end.
-      return ensure_dir_sep(current_dir:sub(1, -2))
-   end
-
-   return fs
-end
-
--- Returns whether path points to a directory. 
-function fs.is_dir(path)
-   return fs.lfs.attributes(path, "mode") == "directory"
-end
-
--- Returns whether path points to a file. 
-function fs.is_file(path)
-   return fs.lfs.attributes(path, "mode") == "file"
-end
-
--- Returns list of all files in directory matching pattern. 
-function fs.extract_files(dir_path, pattern)
-   local res = {}
-
-   local function scan(dir)
-      for path in fs.lfs.dir(dir) do
-         if path ~= "." and path ~= ".." then
-            local full_path = dir .. utils.dir_sep .. path
-
-            if fs.is_dir(full_path) then
-               scan(full_path)
-            elseif path:match(pattern) and fs.is_file(full_path) then
-               table.insert(res, full_path)
-            end
-         end
-      end
-   end
-
-   scan(dir_path)
-   table.sort(res)
-   return res
-end
-
--- Returns modification time for a file. 
-function fs.mtime(path)
-   return fs.lfs.attributes(path, "modification")
-end
-
--- Returns absolute path to current working directory.
-function fs.current_dir()
-   return ensure_dir_sep(assert(fs.lfs.currentdir()))
-end
-
-return fs
-]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.expand_rockspec"])sources["luacheck.expand_rockspec"]=([===[-- <pack luacheck.expand_rockspec> --
-local utils = require "luacheck.utils"
-
-local function extract_lua_files(rockspec)
-   local res = {}
-   local build = rockspec.build
-
-   local function scan(t)
-      for _, file in pairs(t) do
-         if type(file) == "string" and file:sub(-#".lua") == ".lua" then
-            table.insert(res, file)
-         end
-      end
-   end
-
-   if build.type == "builtin" then
-      scan(build.modules)
-   end
-
-   if build.install then
-      if build.install.lua then
-         scan(build.install.lua)
-      end
-
-      if build.install.bin then
-         scan(build.install.bin)
-      end
-   end
-
-   table.sort(res)
-   return res
-end
-
--- Receives a name of a rockspec, returns list of related .lua files or nil and "syntax" or "error". 
-local function expand_rockspec(file)
-   local rockspec, err = utils.load_config(file)
-
-   if not rockspec then
-      return nil, err
-   end
-
-   local ok, files = pcall(extract_lua_files, rockspec)
-
-   if not ok then
-      return nil, "syntax"
-   end
-
-   return files
-end
-
-return expand_rockspec
-]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.multithreading"])sources["luacheck.multithreading"]=([===[-- <pack luacheck.multithreading> --
-local utils = require "luacheck.utils"
-
-local multithreading = {}
-
-local ok, lanes = pcall(require, "lanes")
-ok = ok and pcall(lanes.configure)
-multithreading.has_lanes = ok
-multithreading.lanes = lanes
-
-if not ok then
-   return multithreading
-end
-
--- Worker thread reads pairs {outkey, arg} from inkey channel of linda,
--- applies func to arg and sends result to outkey channel of linda
--- until arg is nil.
-local function worker_task(linda, inkey, func)
-   while true do
-      local _, pair = linda:receive(nil, inkey)
-      local outkey, arg = pair[1], pair[2]
-
-      if arg == nil then
-         return true
-      end
-
-      linda:send(nil, outkey, func(arg))
-   end
-end
-
-local worker_gen = lanes.gen("*", worker_task)
-
--- Maps func over array, performing at most jobs calls in parallel.
-function multithreading.pmap(func, array, jobs)
-   jobs = math.min(jobs, #array)
-
-   if jobs < 2 then
-      return utils.map(func, array)
-   end
-
-   local workers = {}
-   local linda = lanes.linda()
-
-   for i = 1, jobs do
-      workers[i] = worker_gen(linda, 0, func)
-   end
-
-   for i, item in ipairs(array) do
-      linda:send(nil, 0, {i, item})
-   end
-
-   for _ = 1, jobs do
-      linda:send(nil, 0, {})
-   end
-
-   local results = {}
-
-   for i in ipairs(array) do
-      local _, result = linda:receive(nil, i)
-      results[i] = result
-   end
-
-   for _, worker in ipairs(workers) do
-      assert(worker:join())
-   end
-
-   return results
-end
-
-return multithreading
-]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.stds"])sources["luacheck.stds"]=([===[-- <pack luacheck.stds> --
-local utils = require "luacheck.utils"
-
-local stds = {}
-
-stds.busted = {
-   "describe", "insulate", "expose", "it", "pending", "before_each", "after_each",
-   "lazy_setup", "lazy_teardown", "strict_setup", "strict_teardown", "setup", "teardown",
-   "context", "spec", "test", "assert", "spy", "mock", "stub", "finally"}
-
-stds.lua51 = {
-   _G = true, package = true, "_VERSION", "arg", "assert", "collectgarbage", "coroutine",
-   "debug", "dofile", "error", "gcinfo", "getfenv", "getmetatable", "io", "ipairs", "load",
-   "loadfile", "loadstring", "math", "module", "newproxy", "next", "os", "pairs", "pcall",
-   "print", "rawequal", "rawget", "rawset", "require", "select", "setfenv", "setmetatable",
-   "string", "table", "tonumber", "tostring", "type", "unpack", "xpcall"}
-
-stds.lua52 = {
-   _ENV = true, _G = true, package = true, "_VERSION", "arg", "assert", "bit32",
-   "collectgarbage", "coroutine", "debug", "dofile", "error", "getmetatable", "io", "ipairs",
-   "load", "loadfile", "math", "next", "os", "pairs", "pcall", "print", "rawequal", "rawget",
-   "rawlen", "rawset", "require", "select", "setmetatable", "string", "table", "tonumber",
-   "tostring", "type", "xpcall"}
-
-stds.lua52c = {
-   _ENV = true, _G = true, package = true, "_VERSION", "arg", "assert", "bit32",
-   "collectgarbage", "coroutine", "debug", "dofile", "error", "getmetatable", "io", "ipairs",
-   "load", "loadfile", "loadstring", "math", "module", "next", "os", "pairs", "pcall", "print",
-   "rawequal", "rawget", "rawlen", "rawset", "require", "select", "setmetatable", "string",
-   "table", "tonumber", "tostring", "type", "unpack", "xpcall"}
-
-stds.lua53 = {
-   _ENV = true, _G = true, package = true, "_VERSION", "arg", "assert", "collectgarbage",
-   "coroutine", "debug", "dofile", "error", "getmetatable", "io", "ipairs", "load", "loadfile",
-   "math", "next", "os", "pairs", "pcall", "print", "rawequal", "rawget", "rawlen", "rawset",
-   "require", "select", "setmetatable", "string", "table", "tonumber", "tostring", "type",
-   "utf8", "xpcall"}
-
-stds.lua53c = {
-   _ENV = true, _G = true, package = true, "_VERSION", "arg", "assert", "bit32",
-   "collectgarbage", "coroutine", "debug", "dofile", "error", "getmetatable", "io", "ipairs",
-   "load", "loadfile", "math", "next", "os", "pairs", "pcall", "print", "rawequal", "rawget",
-   "rawlen", "rawset", "require", "select", "setmetatable", "string", "table", "tonumber",
-   "tostring", "type", "utf8", "xpcall"}
-
-stds.luajit = {
-   _G = true, package = true, "_VERSION", "arg", "assert", "bit", "collectgarbage", "coroutine",
-   "debug", "dofile", "error", "gcinfo", "getfenv", "getmetatable", "io", "ipairs", "jit",
-   "load", "loadfile", "loadstring", "math", "module", "newproxy", "next", "os", "pairs",
-   "pcall", "print", "rawequal", "rawget", "rawset", "require", "select", "setfenv",
-   "setmetatable", "string", "table", "tonumber", "tostring", "type", "unpack", "xpcall"}
-
-local min = {_G = true, package = true}
-local std_sets = {}
-
-for name, std in pairs(stds) do
-   std_sets[name] = utils.array_to_set(std)
-end
-
-for global in pairs(std_sets.lua51) do
-   if std_sets.lua52[global] and std_sets.lua53[global] and std_sets.luajit[global] then
-      table.insert(min, global)
-   end
-end
-
-stds.min = min
-stds.max = utils.concat_arrays {stds.lua51, stds.lua52, stds.lua53, stds.luajit}
-stds.max._G = true
-stds.max._ENV = true
-stds.max.package = true
-
-stds._G = {}
-
-for global in pairs(_G) do
-   if global == "_G" or global == "package" then
-      stds._G[global] = true
-   else
-      table.insert(stds._G, global)
-   end
-end
-
-local function has_env()
-   local _ENV = {} -- luacheck: ignore
-   return not _G
-end
-
-if has_env() then
-   stds._G._ENV = true
-end
-
-stds.none = {}
-
-return stds
-]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.filter"])sources["luacheck.filter"]=([===[-- <pack luacheck.filter> --
-local options = require "luacheck.options"
-local core_utils = require "luacheck.core_utils"
-local utils = require "luacheck.utils"
-
-local filter = {}
-
--- Returns array of normalized options, one for each file.
-local function get_normalized_opts(report, opts)
-   local res = {}
-
-   for i in ipairs(report) do
-      local option_stack = {opts}
-
-      if opts and opts[i] then
-         option_stack[2] = opts[i]
-
-         for _, nested_opts in ipairs(opts[i]) do
-            table.insert(option_stack, nested_opts)
-         end
-      end
-
-      res[i] = options.normalize(option_stack)
-   end
-
-   return res
-end
-
--- A global is implicitly defined in a file if opts.allow_defined == true and it is set anywhere in the file,
---    or opts.allow_defined_top == true and it is set in the top level function scope.
--- By default, accessing and setting globals in a file is allowed for explicitly defined globals (standard and custom)
---    for that file and implicitly defined globals from that file and all other files except modules (files with opts.module == true).
--- Accessing other globals results in "accessing undefined variable" warning.
--- Setting other globals results in "setting non-standard global variable" warning.
--- Unused implicitly defined global results in "unused global variable" warning.
--- For modules, accessing globals uses same rules as normal files, however, setting globals is only allowed for implicitly defined globals
---    from the module.
--- Setting a global not defined in the module results in "setting non-module global variable" warning.
-
--- Extracts sets of defined, exported and used globals from a file report.
-local function get_defined_and_used_globals(file_report, opts)
-   local defined, globally_defined, used = {}, {}, {}
-
-   for _, warning in ipairs(file_report) do
-      if warning.code:match("11.") then
-         if warning.code == "111" then
-            if (opts.inline and warning.definition) or core_utils.is_definition(opts, warning) then
-               if (opts.inline and warning.in_module) or opts.module then
-                  defined[warning.name] = true
-               else
-                  globally_defined[warning.name] = true
-               end
-            end
-         else
-            used[warning.name] = true
-         end
-      end
-   end
-
-   return defined, globally_defined, used
-end
-
-
--- Returns {globally_defined = globally_defined, globally_used = globally_used, locally_defined = locally_defined},
---    where `globally_defined` is set of globals defined across all files except modules,
---    where `globally_used` is set of globals defined across all files except modules,
---    where `locally_defined` is an array of sets of globals defined per file.
-local function get_implicit_defs_info(report, opts)
-   local info = {
-      globally_defined = {},
-      globally_used = {},
-      locally_defined = {}
-   }
-
-   for i, file_report in ipairs(report) do
-      local defined, globally_defined, used = get_defined_and_used_globals(file_report, opts[i])
-      utils.update(info.globally_defined, globally_defined)
-      utils.update(info.globally_used, used)
-      info.locally_defined[i] = defined
-   end
-
-   return info
-end
-
--- Returns file report clear of implicit definitions.
-local function filter_implicit_defs_file(file_report, opts, globally_defined, globally_used, locally_defined)
-   local res = {}
-
-   for _, warning in ipairs(file_report) do
-      if warning.code:match("11.") then
-         if warning.code == "111" then
-            if (opts.inline and warning.in_module) or opts.module then
-               if not locally_defined[warning.name] then
-                  warning.module = true
-                  table.insert(res, warning)
-               end
-            else
-               if (opts.inline and  warning.definition) or core_utils.is_definition(opts, warning) then
-                  if not globally_used[warning.name] then
-                     warning.code = "131"
-                     warning.top = nil
-                     table.insert(res, warning)
-                  end
-               else
-                  if not globally_defined[warning.name] then
-                     table.insert(res, warning)
-                  end
-               end
-            end
-         else
-            if not globally_defined[warning.name] and not locally_defined[warning.name] then
-               table.insert(res, warning)
-            end
-         end
-      else
-         table.insert(res, warning)
-      end
-   end
-
-   return res
-end
-
--- Returns report clear of implicit definitions.
-local function filter_implicit_defs(report, opts)
-   local res = {}
-   local info = get_implicit_defs_info(report, opts)
-
-   for i, file_report in ipairs(report) do
-      if not file_report.fatal then
-         res[i] = filter_implicit_defs_file(file_report, opts[i], info.globally_defined, info.globally_used, info.locally_defined[i])
-      else
-         res[i] = file_report
-      end
-   end
-
-   return res
-end
-
--- Returns two optional booleans indicating if warning matches pattern by code and name.
-local function match(warning, pattern)
-   local matches_code, matches_name
-   local code_pattern, name_pattern = pattern[1], pattern[2]
-
-   if code_pattern then
-      matches_code = utils.pmatch(warning.code, code_pattern)
-   end
-
-   if name_pattern then
-      if warning.code:match("5..") then
-         -- Statement-related warnings can't match by name.
-         matches_name = false
-      else
-         matches_name = utils.pmatch(warning.name, name_pattern)
-      end
-   end
-
-   return matches_code, matches_name
-end
-
-local function is_enabled(rules, warning)
-   -- A warning is enabled when its code and name are enabled.
-   local enabled_code, enabled_name = false, false
-
-   for _, rule in ipairs(rules) do
-      local matches_one = false
-
-      for _, pattern in ipairs(rule[1]) do
-         local matches_code, matches_name = match(warning, pattern)
-
-         -- If a factor is enabled, warning can't be disable by it.
-         if enabled_code then
-            matches_code = rule[2] ~= "disable"
-         end
-
-         if enabled_name then
-            matches_code = rule[2] ~= "disable"
-         end
-
-         if (matches_code and matches_name ~= false) or
-               (matches_name and matches_code ~= false) then
-            matches_one = true
-         end
-
-         if rule[2] == "enable" then
-            if matches_code then
-               enabled_code = true
-            end
-
-            if matches_name then
-               enabled_name = true
-            end
-
-            if enabled_code and enabled_name then
-               -- Enable as matching to some `enable` pattern by code and to other by name.
-               return true
-            end
-         elseif rule[2] == "disable" then
-            if matches_one then
-               -- Disable as matching to `disable` pattern.
-               return false
-            end
-         end
-      end
-
-      if rule[2] == "only" and not matches_one then
-         -- Disable as not matching to any of `only` patterns.
-         return false
-      end
-   end
-
-   -- Enable by default.
-   return true
-end
-
-function filter.filters(opts, warning)
-   if warning.code:match("[234]..") and warning.name == "_" then
-      return true
-   end
-
-   if warning.code:match("11.") and not warning.module and opts.globals[warning.name] then
-      return true
-   end
-
-   if warning.secondary and not opts.unused_secondaries then
-      return true
-   end
-
-   if warning.self and not opts.self then
-      return true
-   end
-
-   return not is_enabled(opts.rules, warning)
-end
-
-local function filter_file_report(report, opts)
-   local res = {}
-
-   for _, event in ipairs(report) do
-      if ((opts.inline and event.read_only) or event.code:match("11[12]")
-            and not event.module and opts.read_globals[event.name]) and not (
-               (opts.inline and event.global) or (opts.globals[event.name] and not opts.read_globals[event.name])) then
-         event.code = "12" .. event.code:sub(3, 3)
-      end
-
-      if event.code == "011" or (event.code:match("02.") and opts.inline) or (event.code:sub(1, 1) ~= "0" and (not event.filtered and
-            not event["filtered_" .. event.code] or not opts.inline) and not filter.filters(opts, event)) then
-         table.insert(res, event)
-      end
-   end
-
-   return res
-end
-
--- Assumes `opts` are normalized. 
-local function filter_report(report, opts)
-   local res = {}
-
-   for i, file_report in ipairs(report) do
-      if not file_report.fatal then
-         res[i] = filter_file_report(file_report, opts[i])
-      else
-         res[i] = file_report
-      end
-   end
-
-   return res
-end
-
--- Removes warnings from report that do not match options. 
--- `opts[i]`, if present, is used as options when processing `report[i]`
--- together with options in its array part. 
-function filter.filter(report, opts)
-   opts = get_normalized_opts(report, opts)
-   report = filter_implicit_defs(report, opts)
-   return filter_report(report, opts)
-end
-
-return filter
-]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.main"])sources["luacheck.main"]=([===[-- <pack luacheck.main> --
-local luacheck = require "luacheck"
-local argparse = require "luacheck.argparse"
-local config = require "luacheck.config"
-local options = require "luacheck.options"
-local expand_rockspec = require "luacheck.expand_rockspec"
-local multithreading = require "luacheck.multithreading"
-local cache = require "luacheck.cache"
-local format = require "luacheck.format"
-local version = require "luacheck.version"
-local fs = require "luacheck.fs"
-local globbing = require "luacheck.globbing"
-local utils = require "luacheck.utils"
-
-local function critical(msg)
-   io.stderr:write("Critical error: "..msg.."\n")
-   os.exit(3)
-end
-
-local function global_error_handler(err)
-   if type(err) == "table" and err.pattern then
-      critical("Invalid pattern '" .. err.pattern .. "'")
-   else
-      critical(debug.traceback(
-         ("Luacheck %s bug (please report at github.com/mpeterv/luacheck/issues):\n%s"):format(luacheck._VERSION, err), 2))
-   end
-end
-
-local function main()
-   local default_cache_path = ".luacheckcache"
-
-   local function get_parser()
-      local parser = argparse("luacheck", "luacheck " .. luacheck._VERSION .. ", a simple static analyzer for Lua.", [[
-Links:
-
-   Luacheck on GitHub: https://github.com/mpeterv/luacheck
-   Luacheck documentation: http://luacheck.readthedocs.org]])
-
-      parser:argument "files"
-         :description (fs.has_lfs and [[List of files, directories and rockspecs to check.
-Pass "-" to check stdin.]] or [[List of files and rockspecs to check.
-Pass "-" to check stdin.]])
-         :args "+"
-         :argname "<file>"
-
-      parser:flag("-g --no-global", [[Filter out warnings related to global variables.
-Equivalent to --ignore 1.]])
-      parser:flag("-u --no-unused", [[Filter out warnings related to unused variables
-and values. Equivalent to --ignore [23].]])
-      parser:flag("-r --no-redefined", [[Filter out warnings related to redefined variables.
-Equivalent to --ignore 4.]])
-
-      parser:flag("-a --no-unused-args", [[Filter out warnings related to unused arguments and
-loop variables. Equivalent to --ignore 21[23].]])
-      parser:flag("-s --no-unused-secondaries", [[Filter out warnings related to unused variables set
-together with used ones.]])
-      parser:flag("--no-self", "Filter out warnings related to implicit self argument.")
-
-      parser:option("--std", [[Set standard globals. <std> can be one of:
-   _G (default) - globals of the current Lua
-      interpreter;
-   lua51 - globals of Lua 5.1;
-   lua52 - globals of Lua 5.2;
-   lua52c - globals of Lua 5.2 with LUA_COMPAT_ALL;
-   lua53 - globals of Lua 5.3;
-   lua53c - globals of Lua 5.3 with LUA_COMPAT_5_2;
-   luajit - globals of LuaJIT 2.0;
-   min - intersection of globals of Lua 5.1, Lua 5.2,
-      Lua 5.3 and LuaJIT 2.0;
-   max - union of globals of Lua 5.1, Lua 5.2, Lua 5.3
-      and LuaJIT 2.0;
-   busted - globals added by Busted 2.0;
-   none - no standard globals.
-
-   Sets can be combined using "+".]])
-      parser:option("--globals", "Add custom globals on top of standard ones.")
-         :args "*"
-         :count "*"
-         :argname "<global>"
-      parser:option("--read-globals", "Add read-only globals.")
-         :args "*"
-         :count "*"
-         :argname "<global>"
-      parser:option("--new-globals", [[Set custom globals. Removes custom globals added
-previously.]])
-         :args "*"
-         :count "*"
-         :argname "<global>"
-      parser:option("--new-read-globals", [[Set read-only globals. Removes read-only globals added
-previously.]])
-         :args "*"
-         :count "*"
-         :argname "<global>"
-      parser:flag("-c --compat", "Equivalent to --std max.")
-      parser:flag("-d --allow-defined", "Allow defining globals implicitly by setting them.")
-      parser:flag("-t --allow-defined-top", [[Allow defining globals implicitly by setting them in
-the top level scope.]])
-      parser:flag("-m --module", [[Limit visibility of implicitly defined globals to
-their files.]])
-
-      parser:option("--ignore -i", [[Filter out warnings matching these patterns.
-If a pattern contains slash, part before slash matches
-warning code and part after it matches name of related
-variable. Otherwise, if the pattern contains letters
-or underscore, it matches name of related variable.
-Otherwise, the pattern matches warning code.]])
-         :args "+"
-         :count "*"
-         :argname "<patt>"
-      parser:option("--enable -e", "Do not filter out warnings matching these patterns.")
-         :args "+"
-         :count "*"
-         :argname "<patt>"
-      parser:option("--only -o", "Filter out warnings not matching these patterns.")
-         :args "+"
-         :count "*"
-         :argname "<patt>"
-
-      parser:flag("--no-inline", "Disable inline options.")
-
-      parser:mutex(
-         parser:option("--config", "Path to configuration file. (default: "..config.default_path..")"),
-         parser:flag("--no-config", "Do not look up configuration file.")
-      )
-
-      parser:option("--filename", [[Use another filename in output and for selecting
-configuration overrides.]])
-
-      parser:option("--exclude-files", "Do not check files matching these globbing patterns.")
-         :args "+"
-         :count "*"
-         :argname "<glob>"
-      parser:option("--include-files", [[Do not check files not matching these globbing
-patterns.]])
-         :args "+"
-         :count "*"
-         :argname "<glob>"
-
-      if fs.has_lfs then
-         parser:mutex(
-            parser:option("--cache", "Path to cache file.", default_cache_path)
-               :defmode "arg",
-            parser:flag("--no-cache", "Do not use cache.")
-         )
-      end
-
-      if multithreading.has_lanes then
-         parser:option("-j --jobs", "Check <jobs> files in parallel.")
-            :convert(tonumber)
-      end
-
-      parser:option("--formatter" , [[Use custom formatter.
-<formatter> must be a module name or one of:
-   TAP - Test Anything Protocol formatter;
-   JUnit - JUnit XML formatter;
-   plain - simple warning-per-line formatter;
-   default - standard formatter.]])
-
-      parser:flag("-q --quiet", [[Suppress output for files without warnings.
-   -qq: Suppress output of warnings.
-   -qqq: Only print total number of warnings and
-      errors.]])
-         :count "0-3"
-
-      parser:flag("--codes", "Show warning codes.")
-      parser:flag("--ranges", "Show ranges of columns related to warnings.")
-      parser:flag("--no-color", "Do not color output.")
-
-      parser:flag("-v --version", "Show version info and exit.")
-         :action(function() print(version.string) os.exit(0) end)
-
-      return parser
-   end
-
-   local function match_any(globs, name)
-      for _, glob in ipairs(globs) do
-         if globbing.match(glob, name) then
-            return true
-         end
-      end
-
-      return false
-   end
-
-   local function is_included(args, name)
-      return not match_any(args.exclude_files, name) and (#args.include_files == 0 or match_any(args.include_files, name))
-   end
-
-   -- Expands folders, rockspecs, -
-   -- Returns new array of filenames and table mapping indexes of bad rockspecs to error messages.
-   -- Removes "./" in the beginnings of file names.
-   -- Filters filenames using args.exclude_files and args.include_files.
-   local function expand_files(args)
-      local res, bad_rockspecs = {}, {}
-
-      local function add(file)
-         if type(file) == "string" then
-            file = file:gsub("^./", "")
-         end
-
-         local name = args.filename or file
-
-         if type(name) == "string" then
-            if not is_included(args, name) then
-               return false
-            end
-         end
-
-         table.insert(res, file)
-         return true
-      end
-
-      for _, file in ipairs(args.files) do
-         if file == "-" then
-            add(io.stdin)
-         elseif fs.is_dir(file) then
-            for _, nested_file in ipairs(fs.extract_files(file, "%.lua$")) do
-               add(nested_file)
-            end
-         elseif file:sub(-#".rockspec") == ".rockspec" then
-            local related_files, err = expand_rockspec(file)
-
-            if related_files then
-               for _, related_file in ipairs(related_files) do
-                  add(related_file)
-               end
-            else
-               if add(file) then
-                  bad_rockspecs[#res] = err
-               end
-            end
-         else
-            add(file)
-         end
-      end
-
-      return res, bad_rockspecs
-   end
-
-   local function validate_args(args, parser)
-      if args.jobs and args.jobs < 1 then
-         parser:error("<jobs> must be at least 1")
-      end
-
-      if args.std and not options.split_std(args.std) then
-         parser:error("<std> must name a standard library")
-      end
-   end
-
-   local function get_options(args)
-      local res = {}
-
-      for _, argname in ipairs {"allow_defined", "allow_defined_top", "module", "compat", "std"} do
-         if args[argname] then
-            res[argname] = args[argname]
-         end
-      end
-
-      for _, argname in ipairs {"global", "unused", "redefined", "unused", "unused_args",
-            "unused_secondaries", "self", "inline"} do
-         if args["no_"..argname] then
-            res[argname] = false
-         end
-      end
-
-      for _, argname in ipairs {"globals", "read_globals", "new_globals", "new_read_globals",
-            "ignore", "enable", "only"} do
-         if #args[argname] > 0 then
-            res[argname] = utils.concat_arrays(args[argname])
-         end
-      end
-
-      return res
-   end
-
-   local function combine_conf_and_args_path_arrays(conf, args, option)
-      local conf_opts = config.get_top_options(conf)
-
-      if conf_opts[option] then
-         for i, path in ipairs(conf_opts[option]) do
-            conf_opts[option][i] = config.relative_path(conf, path)
-         end
-
-         table.insert(args[option], conf_opts[option])
-      end
-
-      args[option] = utils.concat_arrays(args[option])
-   end
-
-   -- Applies cli-specific options from config to args.
-   local function combine_config_and_args(conf, args)
-      local conf_opts = config.get_top_options(conf)
-
-      if args.no_color then
-         args.color = false
-      else
-         args.color = conf_opts.color ~= false
-      end
-
-      args.codes = args.codes or conf_opts.codes
-      args.formatter = args.formatter or conf_opts.formatter or "default"
-
-      if args.no_cache or not fs.has_lfs then
-         args.cache = false
-      elseif not args.cache then
-         if type(conf_opts.cache) == "string" then
-            args.cache = config.relative_path(conf, conf_opts.cache)
-         else
-            args.cache = conf_opts.cache
-         end
-      end
-
-      if args.cache == true then
-         args.cache = config.relative_path(conf, default_cache_path)
-      end
-
-      args.jobs = args.jobs or conf_opts.jobs
-
-      combine_conf_and_args_path_arrays(conf, args, "exclude_files")
-      combine_conf_and_args_path_arrays(conf, args, "include_files")
-   end
-
-   -- Returns sparse array of mtimes and map of filenames to cached reports.
-   local function get_mtimes_and_cached_reports(cache_filename, files, bad_files)
-      local cache_files = {}
-      local cache_mtimes = {}
-      local sparse_mtimes = {}
-
-      for i, file in ipairs(files) do
-         if not bad_files[i] and file ~= io.stdin then
-            table.insert(cache_files, file)
-            local mtime = fs.mtime(file)
-            table.insert(cache_mtimes, mtime)
-            sparse_mtimes[i] = mtime
-         end
-      end
-
-      return sparse_mtimes, cache.load(cache_filename, cache_files, cache_mtimes) or critical(
-         ("Couldn't load cache from %s: data corrupted"):format(cache_filename))
-   end
-
-   -- Returns sparse array of sources of files that need to be checked, updates bad_files with files that had I/O issues.
-   local function get_srcs_to_check(cached_reports, files, bad_files)
-      local res = {}
-
-      for i, file in ipairs(files) do
-         if not bad_files[i] and not cached_reports[file] then
-            local src = utils.read_file(file)
-
-            if src then
-               res[i] = src
-            else
-               bad_files[i] = "I/O"
-            end
-         end
-      end
-
-      return res
-   end
-
-   -- Returns sparse array of new reports.
-   local function get_new_reports(files, srcs, jobs)
-      local dense_srcs = {}
-      local dense_to_sparse = {}
-
-      for i in ipairs(files) do
-         if srcs[i] then
-            table.insert(dense_srcs, srcs[i])
-            dense_to_sparse[#dense_srcs] = i
-         end
-      end
-
-      local map = jobs and multithreading.has_lanes and multithreading.pmap or utils.map
-      local dense_res = map(luacheck.get_report, dense_srcs, jobs)
-
-      local res = {}
-
-      for i in ipairs(dense_srcs) do
-         res[dense_to_sparse[i]] = dense_res[i]
-      end
-
-      return res
-   end
-
-   -- Updates cache with new_reports. Updates bad_files for which mtime is absent.
-   local function update_cache(cache_filename, files, bad_files, srcs, mtimes, new_reports)
-      local cache_files = {}
-      local cache_mtimes = {}
-      local cache_reports = {}
-
-      for i, file in ipairs(files) do
-         if srcs[i] and file ~= io.stdin then
-            if not mtimes[i] then
-               bad_files[i] = "I/O"
-            else
-               table.insert(cache_files, file)
-               table.insert(cache_mtimes, mtimes[i])
-               table.insert(cache_reports, new_reports[i] or false)
-            end
-         end
-      end
-
-      return cache.update(cache_filename, cache_files, cache_mtimes, cache_reports) or critical(
-         ("Couldn't save cache to %s: I/O error"):format(cache_filename))
-   end
-
-   -- Returns array of reports for files.
-   local function get_reports(cache_filename, files, bad_rockspecs, jobs)
-      local bad_files = utils.update({}, bad_rockspecs)
-      local mtimes
-      local cached_reports
-
-      if cache_filename then
-         mtimes, cached_reports = get_mtimes_and_cached_reports(cache_filename, files, bad_files)
-      else
-         cached_reports = {}
-      end
-
-      local srcs = get_srcs_to_check(cached_reports, files, bad_files)
-      local new_reports = get_new_reports(files, srcs, jobs)
-
-      if cache_filename then
-         update_cache(cache_filename, files, bad_files, srcs, mtimes, new_reports)
-      end
-
-      local res = {}
-
-      for i, file in ipairs(files) do
-         if bad_files[i] then
-            res[i] = {fatal = bad_files[i]}
-         else
-            res[i] = cached_reports[file] or new_reports[i]
-         end
-      end
-
-      return res
-   end
-
-   local function combine_config_and_options(conf, cli_opts, files)
-      local res = {}
-
-      for i, file in ipairs(files) do
-         res[i] = config.get_options(conf, file)
-         table.insert(res[i], cli_opts)
-      end
-
-      return res
-   end
-
-   local function substitute_filename(new_filename, files)
-      if new_filename then
-         for i = 1, #files do
-            files[i] = new_filename
-         end
-      end
-   end
-
-   local function normalize_stdin_in_filenames(files)
-      for i, file in ipairs(files) do
-         if type(file) ~= "string" then
-            files[i] = "stdin"
-         end
-      end
-   end
-
-   local builtin_formatters = utils.array_to_set({"TAP", "JUnit", "plain", "default"})
-
-   local function pformat(report, file_names, conf, args)
-      if builtin_formatters[args.formatter] then
-         return format.format(report, file_names, args)
-      end
-
-      local formatter = args.formatter
-      local ok, output
-
-      if type(formatter) == "string" then
-         ok, formatter = config.relative_require(conf, formatter)
-
-         if not ok then
-            critical(("Couldn't load custom formatter '%s': %s"):format(args.formatter, formatter))
-         end
-      end
-
-      ok, output = pcall(formatter, report, file_names, args)
-
-      if not ok then
-         critical(("Couldn't run custom formatter '%s': %s"):format(tostring(args.formatter), output))
-      end
-
-      return output
-   end
-
-   local parser = get_parser()
-   local args = parser:parse()
-   local opts = get_options(args)
-   local conf
-
-   if args.no_config then
-      conf = config.empty_config
-   else
-      local err
-      conf, err = config.load_config(args.config)
-
-      if not conf then
-         critical(err)
-      end
-   end
-
-   -- Validate args only after loading config so that custom stds are already in place.
-   validate_args(args, parser)
-   combine_config_and_args(conf, args)
-
-   local files, bad_rockspecs = expand_files(args)
-   local reports = get_reports(args.cache, files, bad_rockspecs, args.jobs)
-   substitute_filename(args.filename, files)
-   local report = luacheck.process_reports(reports, combine_config_and_options(conf, opts, files))
-   normalize_stdin_in_filenames(files)
-
-   local output = pformat(report, files, conf, args)
-
-   if #output > 0 and output:sub(-1) ~= "\n" then
-      output = output .. "\n"
-   end
-
-   io.stdout:write(output)
-
-   local exit_code
-
-   if report.fatals > 0 then
-      exit_code = 2
-   elseif report.warnings > 0 or report.errors > 0 then
-      exit_code = 1
-   else
-      exit_code = 0
-   end
-
-   os.exit(exit_code)
-end
-
-xpcall(main, global_error_handler)
-]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.inline_options"])sources["luacheck.inline_options"]=([===[-- <pack luacheck.inline_options> --
+assert(not sources["luacheck.inline_options"],"module already exists")sources["luacheck.inline_options"]=([===[-- <pack luacheck.inline_options> --
 local options = require "luacheck.options"
 local filter = require "luacheck.filter"
 local core_utils = require "luacheck.core_utils"
@@ -3871,1005 +3729,466 @@ end
 
 return handle_inline_options
 ]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.linearize"])sources["luacheck.linearize"]=([===[-- <pack luacheck.linearize> --
-local lexer = require "luacheck.lexer"
+assert(not sources["luacheck"],"module already exists")sources["luacheck"]=([===[-- <pack luacheck> --
+local check = require "luacheck.check"
+local filter = require "luacheck.filter"
+local options = require "luacheck.options"
+local format = require "luacheck.format"
 local utils = require "luacheck.utils"
 
-local pseudo_labels = utils.array_to_set({"do", "else", "break", "end", "return"})
-
--- Who needs classes anyway.
-local function new_line()
-   return {
-      accessed_upvalues = {}, -- Maps variables to arrays of accessing items.
-      set_upvalues = {}, -- Maps variables to arays of setting items.
-      lines = {},
-      items = utils.Stack()
-   }
-end
-
-local function new_scope(line)
-   return {
-      vars = {},
-      labels = {},
-      gotos = {},
-      line = line
-   }
-end
-
-local function new_var(line, node, type_)
-   return {
-      name = node[1],
-      location = node.location,
-      type = type_,
-      self = node.implicit,
-      line = line,
-      scope_start = line.items.size + 1,
-      values = {}
-   }
-end
-
-local function new_value(var_node, value_node, is_init)
-   return {
-      var = var_node.var,
-      location = var_node.location,
-      type = value_node and value_node.tag == "Function" and "func" or (is_init and var_node.var.type or "var"),
-      initial = is_init,
-      empty = is_init and not value_node and (var_node.var.type == "var")
-   }
-end
-
-local function new_label(line, name, location, end_column)
-   return {
-      name = name,
-      location = location,
-      end_column = end_column,
-      index = line.items.size + 1
-   }
-end
-
-local function new_goto(name, jump, location)
-   return {
-      name = name,
-      jump = jump,
-      location = location
-   }
-end
-
-local function new_jump_item(is_conditional)
-   return {
-      tag = is_conditional and "Cjump" or "Jump"
-   }
-end
-
-local function new_eval_item(expr)
-   return {
-      tag = "Eval",
-      expr = expr,
-      location = expr.location,
-      token = expr.first_token,
-      accesses = {},
-      used_values = {},
-      lines = {}
-   }
-end
-
-local function new_noop_item(node, loop_end)
-   return {
-      tag = "Noop",
-      location = node.location,
-      token = node.first_token,
-      loop_end = loop_end
-   }
-end
-
-local function new_local_item(lhs, rhs, location, token)
-   return {
-      tag = "Local",
-      lhs = lhs,
-      rhs = rhs,
-      location = location,
-      token = token,
-      accesses = rhs and {},
-      used_values = rhs and {},
-      lines = rhs and {}
-   }
-end
-
-local function new_set_item(lhs, rhs, location, token)
-   return {
-      tag = "Set",
-      lhs = lhs,
-      rhs = rhs,
-      location = location,
-      token = token,
-      accesses = {},
-      used_values = {},
-      lines = {}
-   }
-end
-
-local function is_unpacking(node)
-   return node.tag == "Dots" or node.tag == "Call" or node.tag == "Invoke"
-end
-
-local LinState = utils.class()
-
-function LinState:__init(chstate)
-   self.chstate = chstate
-   self.lines = utils.Stack()
-   self.scopes = utils.Stack()
-end
-
-function LinState:enter_scope()
-   self.scopes:push(new_scope(self.lines.top))
-end
-
-function LinState:leave_scope()
-   local left_scope = self.scopes:pop()
-   local prev_scope = self.scopes.top
-
-   for _, goto_ in ipairs(left_scope.gotos) do
-      local label = left_scope.labels[goto_.name]
-
-      if label then
-         goto_.jump.to = label.index
-         label.used = true
-      else
-         if not prev_scope or prev_scope.line ~= self.lines.top then
-            if goto_.name == "break" then
-               lexer.syntax_error(goto_.location, goto_.location.column + 4, "'break' is not inside a loop")
-            else
-               lexer.syntax_error(goto_.location, goto_.location.column + 3, ("no visible label '%s'"):format(goto_.name))
-            end
-         end
-
-         table.insert(prev_scope.gotos, goto_)
-      end
-   end
-
-   for name, label in pairs(left_scope.labels) do
-      if not label.used and not pseudo_labels[name] then
-         self.chstate:warn_unused_label(label)
-      end
-   end
-
-   for _, var in pairs(left_scope.vars) do
-      var.scope_end = self.lines.top.items.size
-   end
-end
-
-function LinState:register_var(node, type_)
-   local var = new_var(self.lines.top, node, type_)
-   local prev_var = self:resolve_var(var.name)
-
-   if prev_var then
-      local same_scope = self.scopes.top.vars[var.name]
-      self.chstate:warn_redefined(var, prev_var, same_scope)
-
-      if same_scope then
-         prev_var.scope_end = self.lines.top.items.size
-      end
-   end
-
-   self.scopes.top.vars[var.name] = var
-   node.var = var
-   return var
-end
-
-function LinState:register_vars(nodes, type_)
-   for _, node in ipairs(nodes) do
-      self:register_var(node, type_)
-   end
-end
-
-function LinState:resolve_var(name)
-   for _, scope in utils.ripairs(self.scopes) do
-      local var = scope.vars[name]
-
-      if var then
-         return var
-      end
-   end
-end
-
-function LinState:check_var(node, action)
-   local var = self:resolve_var(node[1])
-
-   if not var then
-      self.chstate:warn_global(node, action, self.lines.size == 1)
-   else
-      node.var = var
-   end
-
-   return var
-end
-
-function LinState:register_label(name, location, end_column)
-   if self.scopes.top.labels[name] then
-      assert(not pseudo_labels[name])
-      lexer.syntax_error(location, end_column, ("label '%s' already defined on line %d"):format(
-         name, self.scopes.top.labels[name].location.line))
-   end
-
-   self.scopes.top.labels[name] = new_label(self.lines.top, name, location, end_column)
-end
-
--- `node` is assignment node (`Local or `Set).
-function LinState:check_balance(node)
-   if node[2] then
-      if #node[1] < #node[2] then
-         self.chstate:warn_unbalanced(node.equals_location, true)
-      elseif (#node[1] > #node[2]) and node.tag ~= "Local" and not is_unpacking(node[2][#node[2]]) then
-         self.chstate:warn_unbalanced(node.equals_location)
-      end
-   end
-end
-
-function LinState:check_empty_block(block)
-   if #block == 0 then
-      self.chstate:warn_empty_block(block.location, block.tag == "Do")
-   end
-end
-
-function LinState:emit(item)
-   self.lines.top.items:push(item)
-end
-
-function LinState:emit_goto(name, is_conditional, location)
-   local jump = new_jump_item(is_conditional)
-   self:emit(jump)
-   table.insert(self.scopes.top.gotos, new_goto(name, jump, location))
-end
-
-local tag_to_boolean = {
-   Nil = false, False = false,
-   True = true, Number = true, String = true, Table = true, Function = true
+local luacheck = {
+   _VERSION = "0.11.1"
 }
 
--- Emits goto that jumps to ::name:: if bool(cond_node) == false.
-function LinState:emit_cond_goto(name, cond_node)
-   local cond_bool = tag_to_boolean[cond_node.tag]
+local function raw_validate_options(fname, opts)
+   assert(opts == nil or type(opts) == "table",
+      ("bad argument #2 to '%s' (table or nil expected, got %s)"):format(fname, type(opts))
+   )
 
-   if cond_bool ~= true then
-      self:emit_goto(name, cond_bool ~= false)
-   end
-end
+   local ok, invalid_field = options.validate(options.all_options, opts)
 
-function LinState:emit_noop(node, loop_end)
-   self:emit(new_noop_item(node, loop_end))
-end
-
-function LinState:emit_stmt(stmt)
-   self["emit_stmt_" .. stmt.tag](self, stmt)
-end
-
-function LinState:emit_stmts(stmts)
-   for _, stmt in ipairs(stmts) do
-      self:emit_stmt(stmt)
-   end
-end
-
-function LinState:emit_block(block)
-   self:enter_scope()
-   self:emit_stmts(block)
-   self:leave_scope()
-end
-
-function LinState:emit_stmt_Do(node)
-   self:check_empty_block(node)
-   self:emit_noop(node)
-   self:emit_block(node)
-end
-
-function LinState:emit_stmt_While(node)
-   self:emit_noop(node)
-   self:enter_scope()
-   self:register_label("do")
-   self:emit_expr(node[1])
-   self:emit_cond_goto("break", node[1])
-   self:emit_block(node[2])
-   self:emit_noop(node, true)
-   self:emit_goto("do")
-   self:register_label("break")
-   self:leave_scope()
-end
-
-function LinState:emit_stmt_Repeat(node)
-   self:emit_noop(node)
-   self:enter_scope()
-   self:register_label("do")
-   self:enter_scope()
-   self:emit_stmts(node[1])
-   self:emit_expr(node[2])
-   self:leave_scope()
-   self:emit_cond_goto("do", node[2])
-   self:register_label("break")
-   self:leave_scope()
-end
-
-function LinState:emit_stmt_Fornum(node)
-   self:emit_noop(node)
-   self:emit_expr(node[2])
-   self:emit_expr(node[3])
-
-   if node[5] then
-      self:emit_expr(node[4])
-   end
-
-   self:enter_scope()
-   self:register_label("do")
-   self:emit_goto("break", true)
-   self:enter_scope()
-   self:emit(new_local_item({node[1]}))
-   self:register_var(node[1], "loopi")
-   self:emit_stmts(node[5] or node[4])
-   self:leave_scope()
-   self:emit_noop(node, true)
-   self:emit_goto("do")
-   self:register_label("break")
-   self:leave_scope()
-end
-
-function LinState:emit_stmt_Forin(node)
-   self:emit_noop(node)
-   self:emit_exprs(node[2])
-   self:enter_scope()
-   self:register_label("do")
-   self:emit_goto("break", true)
-   self:enter_scope()
-   self:emit(new_local_item(node[1]))
-   self:register_vars(node[1], "loop")
-   self:emit_stmts(node[3])
-   self:leave_scope()
-   self:emit_noop(node, true)
-   self:emit_goto("do")
-   self:register_label("break")
-   self:leave_scope()
-end
-
-function LinState:emit_stmt_If(node)
-   self:emit_noop(node)
-   self:enter_scope()
-
-   for i = 1, #node - 1, 2 do
-      self:enter_scope()
-      self:emit_expr(node[i])
-      self:emit_cond_goto("else", node[i])
-      self:check_empty_block(node[i + 1])
-      self:emit_block(node[i + 1])
-      self:emit_goto("end")
-      self:register_label("else")
-      self:leave_scope()
-   end
-
-   if #node % 2 == 1 then
-      self:check_empty_block(node[#node])
-      self:emit_block(node[#node])
-   end
-
-   self:register_label("end")
-   self:leave_scope()
-end
-
-function LinState:emit_stmt_Label(node)
-   self:register_label(node[1], node.location, node.end_column)
-end
-
-function LinState:emit_stmt_Goto(node)
-   self:emit_noop(node)
-   self:emit_goto(node[1], false, node.location)
-end
-
-function LinState:emit_stmt_Break(node)
-   self:emit_goto("break", false, node.location)
-end
-
-function LinState:emit_stmt_Return(node)
-   self:emit_noop(node)
-   self:emit_exprs(node)
-   self:emit_goto("return")
-end
-
-function LinState:emit_expr(node)
-   local item = new_eval_item(node)
-   self:scan_expr(item, node)
-   self:emit(item)
-end
-
-function LinState:emit_exprs(exprs)
-   for _, expr in ipairs(exprs) do
-      self:emit_expr(expr)
-   end
-end
-
-LinState.emit_stmt_Call = LinState.emit_expr
-LinState.emit_stmt_Invoke = LinState.emit_expr
-
-function LinState:emit_stmt_Local(node)
-   self:check_balance(node)
-   local item = new_local_item(node[1], node[2], node.location, node.first_token)
-   self:emit(item)
-
-   if node[2] then
-      self:scan_exprs(item, node[2])
-   end
-
-   self:register_vars(node[1], "var")
-end
-
-function LinState:emit_stmt_Localrec(node)
-   local item = new_local_item({node[1]}, {node[2]}, node.location, node.first_token)
-   self:register_var(node[1], "var")
-   self:emit(item)
-   self:scan_expr(item, node[2])
-end
-
-function LinState:emit_stmt_Set(node)
-   self:check_balance(node)
-   local item = new_set_item(node[1], node[2], node.location, node.first_token)
-   self:scan_exprs(item, node[2])
-
-   for _, expr in ipairs(node[1]) do
-      if expr.tag == "Id" then
-         local var = self:check_var(expr, "set")
-
-         if var then
-            self:register_upvalue_action(item, var, "set")
-         end
+   if not ok then
+      if invalid_field then
+         error(("bad argument #2 to '%s' (invalid value of option '%s')"):format(fname, invalid_field))
       else
-         assert(expr.tag == "Index")
+         error(("bad argument #2 to '%s'"):format(fname))
+      end
+   end
+end
 
-         if expr[1].tag == "Id" and not self:resolve_var(expr[1][1]) then
-            -- Warn about mutated global.
-            self:check_var(expr[1], "mutate")
-         else
-            self:scan_expr(item, expr[1])
+local function validate_options(fname, items, opts)
+   raw_validate_options(fname, opts)
+
+   if opts ~= nil then
+      for i in ipairs(items) do
+         raw_validate_options(fname, opts[i])
+
+         if opts[i] ~= nil then
+            for _, nested_opts in ipairs(opts[i]) do
+               raw_validate_options(fname, nested_opts)
+            end
          end
+      end
+   end
+end
 
-         self:scan_expr(item, expr[2])
+-- Returns report for a string. Report is an array of warnings and errors.
+function luacheck.get_report(src)
+   assert(type(src) == "string", ("bad argument #1 to 'luacheck.get_report' (string expected, got %s)"):format(type(src)))
+   return check(src)
+end
+
+-- Applies options to reports. Reports with .fatal field are unchanged.
+-- Options are applied to reports[i] in order: options, options[i], options[i][1], options[i][2], ...
+-- Returns new array of reports, adds .warnings, .errors and .fatals fields to this array.
+function luacheck.process_reports(reports, opts)
+   assert(type(reports) == "table", ("bad argument #1 to 'luacheck.process_reports' (table expected, got %s)"):format(type(reports)))
+   validate_options("luacheck.process_reports", reports, opts)
+   local report = filter.filter(reports, opts)
+   report.warnings = 0
+   report.errors = 0
+   report.fatals = 0
+
+   for _, file_report in ipairs(report) do
+      if file_report.fatal then
+         report.fatals = report.fatals + 1
+      else
+         for _, event in ipairs(file_report) do
+            if event.code:sub(1, 1) == "0" then
+               report.errors = report.errors + 1
+            else
+               report.warnings = report.warnings + 1
+            end
+         end
       end
    end
 
-   self:emit(item)
+   return report
 end
 
+-- Checks strings with options, returns report.
+-- Tables with .fatal field are unchanged.
+function luacheck.check_strings(srcs, opts)
+   assert(type(srcs) == "table", ("bad argument #1 to 'luacheck.check_strings' (table expected, got %s)"):format(type(srcs)))
 
-function LinState:scan_expr(item, node)
-   local scanner = self["scan_expr_" .. node.tag]
+   for _, item in ipairs(srcs) do
+      assert(type(item) == "string" or type(item) == "table", (
+         "bad argument #1 to 'luacheck.check_strings' (array of strings or tables expected, got %s)"):format(type(item))
+      )
+   end
 
-   if scanner then
-      scanner(self, item, node)
+   validate_options("luacheck.check_strings", srcs, opts)
+
+   local reports = {}
+
+   for i, src in ipairs(srcs) do
+      if type(src) == "table" and src.fatal then
+         reports[i] = src
+      else
+         reports[i] = luacheck.get_report(src)
+      end
+   end
+
+   return luacheck.process_reports(reports, opts)
+end
+
+function luacheck.check_files(files, opts)
+   assert(type(files) == "table", ("bad argument #1 to 'luacheck.check_files' (table expected, got %s)"):format(type(files)))
+
+   for _, item in ipairs(files) do
+      assert(type(item) == "string" or io.type(item) == "file", (
+         "bad argument #1 to 'luacheck.check_files' (array of paths or file handles expected, got %s)"):format(type(item))
+      )
+   end
+
+   validate_options("luacheck.check_files", files, opts)
+
+   local srcs = {}
+
+   for i, file in ipairs(files) do
+      srcs[i] = utils.read_file(file) or {fatal = "I/O"}
+   end
+
+   return luacheck.check_strings(srcs, opts)
+end
+
+function luacheck.get_message(issue)
+   assert(type(issue) == "table", ("bad argument #1 to 'luacheck.get_message' (table expected, got %s)"):format(type(issue)))
+   return format.get_message(issue)
+end
+
+setmetatable(luacheck, {__call = function(_, ...)
+   return luacheck.check_files(...)
+end})
+
+return luacheck
+]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
+assert(not sources["luacheck.globbing"],"module already exists")sources["luacheck.globbing"]=([===[-- <pack luacheck.globbing> --
+local fs = require "luacheck.fs"
+local utils = require "luacheck.utils"
+
+-- Only ?, *, ** and simple character classes (with ranges and negation) are supported.
+-- Hidden files are not treated specially. Special characters can't be escaped.
+local globbing = {}
+
+local cur_dir = fs.current_dir()
+
+local function is_regular_path(glob)
+   return not glob:find("[*?%[]")
+end
+
+local function get_parts(path)
+   local parts = {}
+
+   for part in path:gmatch("[^"..utils.dir_sep.."]+") do
+      table.insert(parts, part)
+   end
+
+   return parts
+end
+
+local function glob_pattern_escaper(c)
+   return ((c == "*" or c == "?") and "." or "%")..c
+end
+
+local function glob_range_escaper(c)
+   return c == "-" and c or ("%"..c)
+end
+
+local function glob_part_to_pattern(glob_part)
+   local buffer = {"^"}
+   local i = 1
+
+   while i <= #glob_part do
+      local bracketless
+      bracketless, i = glob_part:match("([^%[]*)()", i)
+      table.insert(buffer, (bracketless:gsub("%p", glob_pattern_escaper)))
+
+      if glob_part:sub(i, i) == "[" then
+         table.insert(buffer, "[")
+         i = i + 1
+         local first_char = glob_part:sub(i, i)
+
+         if first_char == "!" then
+            table.insert(buffer, "^")
+            i = i + 1
+         elseif first_char == "]" then
+            table.insert(buffer, "%]")
+            i = i + 1
+         end
+
+         bracketless, i = glob_part:match("([^%]]*)()", i)
+
+         if bracketless:sub(1, 1) == "-" then
+            table.insert(buffer, "%-")
+            bracketless = bracketless:sub(2)
+         end
+
+         local last_dash = ""
+
+         if bracketless:sub(-1) == "-" then
+            last_dash = "-"
+            bracketless = bracketless:sub(1, -2)
+         end
+
+         table.insert(buffer, (bracketless:gsub("%p", glob_range_escaper)))
+         table.insert(buffer, last_dash.."]")
+         i = i + 1
+      end
+   end
+
+   table.insert(buffer, "$")
+   return table.concat(buffer)
+end
+
+local function part_match(glob_part, path_part)
+   return utils.pmatch(path_part, glob_part_to_pattern(glob_part))
+end
+
+local function parts_match(glob_parts, glob_i, path_parts, path_i)
+   local glob_part = glob_parts[glob_i]
+
+   if not glob_part then
+      -- Reached glob end, path matches the glob or its subdirectory.
+      -- E.g. path "foo/bar/baz/src.lua" matches glob "foo/*/baz".
+      return true
+   end
+
+   if glob_part == "**" then
+      -- "**" can consume any number of path parts.
+      for i = path_i, #path_parts + 1 do
+         if parts_match(glob_parts, glob_i + 1, path_parts, i) then
+            return true
+         end
+      end
+
+      return false
+   end
+
+   local path_part = path_parts[path_i]
+   return path_part and part_match(glob_part, path_part) and parts_match(glob_parts, glob_i + 1, path_parts, path_i + 1)
+end
+
+-- Checks if a path matches a globbing pattern.
+function globbing.match(glob, path)
+   glob = fs.normalize(fs.join(cur_dir, glob))
+   path = fs.normalize(fs.join(cur_dir, path))
+
+   if is_regular_path(glob) then
+      return fs.is_subpath(glob, path)
+   end
+
+   local glob_base, path_base
+   glob_base, glob = fs.split_base(glob)
+   path_base, path = fs.split_base(path)
+
+   if glob_base ~= path_base then
+      return false
+   end
+
+   local glob_parts = get_parts(glob)
+   local path_parts = get_parts(path)
+   return parts_match(glob_parts, 1, path_parts, 1)
+end
+
+return globbing
+]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
+assert(not sources["luacheck.fs"],"module already exists")sources["luacheck.fs"]=([===[-- <pack luacheck.fs> --
+local fs = {}
+
+local utils = require "luacheck.utils"
+
+fs.has_lfs, fs.lfs = pcall(require, "lfs")
+
+local function ensure_dir_sep(path)
+   if path:sub(-1) ~= utils.dir_sep then
+      return path .. utils.dir_sep
+   end
+
+   return path
+end
+
+if utils.is_windows then
+   function fs.split_base(path)
+      if path:match("^%a:\\") then
+         return path:sub(1, 3), path:sub(4)
+      else
+         -- Disregard UNC stuff for now.
+         return "", path
+      end
+   end
+else
+   function fs.split_base(path)
+      if path:match("^/") then
+         if path:match("^//") then
+            return "//", path:sub(3)
+         else
+            return "/", path:sub(2)
+         end
+      else
+         return "", path
+      end
    end
 end
 
-function LinState:scan_exprs(item, nodes)
-   for _, node in ipairs(nodes) do
-      self:scan_expr(item, node)
+local function is_absolute(path)
+   return fs.split_base(path) ~= ""
+end
+
+function fs.normalize(path)
+   local base, rest = fs.split_base(path)
+   rest = rest:gsub("[/\\]", utils.dir_sep)
+
+   local parts = {}
+
+   for part in rest:gmatch("[^"..utils.dir_sep.."]+") do
+      if part ~= "." then
+         if part == ".." and #parts > 0 and parts[#parts] ~= ".." then
+            parts[#parts] = nil
+         else
+            parts[#parts + 1] = part
+         end
+      end
+   end
+
+   if base == "" and #parts == 0 then
+      return "."
+   else
+      return base..table.concat(parts, utils.dir_sep)
    end
 end
 
-function LinState:register_upvalue_action(item, var, action)
-   local key = (action == "set") and "set_upvalues" or "accessed_upvalues"
+function fs.join(base, path)
+   if base == "" or is_absolute(path) then
+      return path
+   else
+      return ensure_dir_sep(base)..path
+   end
+end
 
-   for _, line in utils.ripairs(self.lines) do
-      if line == var.line then
+function fs.is_subpath(path, subpath)
+   local base1, rest1 = fs.split_base(path)
+   local base2, rest2 = fs.split_base(subpath)
+
+   if base1 ~= base2 then
+      return false
+   end
+
+   if rest2:sub(1, #rest1) ~= rest1 then
+      return false
+   end
+
+   return rest1 == rest2 or rest2:sub(#rest1 + 1, #rest1 + 1) == utils.dir_sep
+end
+
+-- Searches for file starting from path, going up until the file
+-- is found or root directory is reached.
+-- Path must be absolute.
+-- Returns absolute and relative paths to directory containing file or nil.
+function fs.find_file(path, file)
+   if is_absolute(file) then
+      return fs.is_file(file) and path, ""
+   end
+
+   path = fs.normalize(path)
+   local base, rest = fs.split_base(path)
+   local rel_path = ""
+
+   while true do
+      if fs.is_file(fs.join(base..rest, file)) then
+         return base..rest, rel_path
+      elseif rest == "" then
          break
       end
 
-      if not line[key][var] then
-         line[key][var] = {}
-      end
-
-      table.insert(line[key][var], item)
+      rest = rest:match("^(.*)"..utils.dir_sep..".*$") or ""
+      rel_path = rel_path..".."..utils.dir_sep
    end
 end
 
-function LinState:mark_access(item, node)
-   node.var.accessed = true
-
-   if not item.accesses[node.var] then
-      item.accesses[node.var] = {}
+if not fs.has_lfs then
+   function fs.is_dir(_)
+      return false
    end
 
-   table.insert(item.accesses[node.var], node)
-   self:register_upvalue_action(item, node.var, "access")
-end
-
-function LinState:scan_expr_Id(item, node)
-   if self:check_var(node, "access") then
-      self:mark_access(item, node)
-   end
-end
-
-function LinState:scan_expr_Dots(item, node)
-   local dots = self:check_var(node, "access")
-
-   if not dots or dots.line ~= self.lines.top then
-      lexer.syntax_error(node.location, node.location.column + 2, "cannot use '...' outside a vararg function")
-   end
-
-   self:mark_access(item, node)
-end
-
-LinState.scan_expr_Index = LinState.scan_exprs
-LinState.scan_expr_Call = LinState.scan_exprs
-LinState.scan_expr_Invoke = LinState.scan_exprs
-LinState.scan_expr_Paren = LinState.scan_exprs
-LinState.scan_expr_Pair = LinState.scan_exprs
-LinState.scan_expr_Table = LinState.scan_exprs
-
-function LinState:scan_expr_Op(item, node)
-   self:scan_expr(item, node[2])
-
-   if node[3] then
-      self:scan_expr(item, node[3])
-   end
-end
-
--- Puts tables {var = value{} into field `set_variables` of items in line which set values.
--- Registers set values in field `values` of variables.
-function LinState:register_set_variables()
-   local line = self.lines.top
-
-   for _, item in ipairs(line.items) do
-      if item.tag == "Local" or item.tag == "Set" then
-         item.set_variables = {}
-
-         local is_init = item.tag == "Local"
-         local unpacking_item -- Rightmost item of rhs which may unpack into several lhs items.
-
-         if item.rhs then
-            local last_rhs_item = item.rhs[#item.rhs]
-
-            if is_unpacking(last_rhs_item) then
-               unpacking_item = last_rhs_item
-            end
-         end
-
-         local secondaries -- Array of values unpacked from rightmost rhs item.
-
-         if unpacking_item and (#item.lhs > #item.rhs) then
-            secondaries = {}
-         end
-
-         for i, node in ipairs(item.lhs) do
-            local value
-
-            if node.var then
-               value = new_value(node, item.rhs and item.rhs[i] or unpacking_item, is_init)
-               item.set_variables[node.var] = value
-               table.insert(node.var.values, value)
-            end
-
-            if secondaries and (i >= #item.rhs) then
-               if value then
-                  value.secondaries = secondaries
-                  table.insert(secondaries, value)
-               else
-                  -- If one of secondary values is assigned to a global or index,
-                  -- it is considered used.
-                  secondaries.used = true
-               end
-            end
-         end
-      end
-   end
-end
-
-function LinState:build_line(args, block)
-   self.lines:push(new_line())
-   self:enter_scope()
-   self:emit(new_local_item(args))
-   self:enter_scope()
-   self:register_vars(args, "arg")
-   self:emit_stmts(block)
-   self:leave_scope()
-   self:register_label("return")
-   self:leave_scope()
-   self:register_set_variables()
-   local line = self.lines:pop()
-
-   for _, prev_line in ipairs(self.lines) do
-      table.insert(prev_line.lines, line)
-   end
-
-   return line
-end
-
-function LinState:scan_expr_Function(item, node)
-   local line = self:build_line(node[1], node[2])
-   table.insert(item.lines, line)
-
-   for _, nested_line in ipairs(line.lines) do
-      table.insert(item.lines, nested_line)
-   end
-end
-
--- Builds linear representation of AST and returns it.
--- Emits warnings: global, redefined/shadowed, unused label, unbalanced assignment, empty block.
-local function linearize(chstate, ast)
-   local linstate = LinState(chstate)
-   local line = linstate:build_line({{tag = "Dots", "..."}}, ast)
-   assert(linstate.lines.size == 0)
-   assert(linstate.scopes.size == 0)
-   return line
-end
-
-return linearize
-]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.analyze"])sources["luacheck.analyze"]=([===[-- <pack luacheck.analyze> --
-local core_utils = require "luacheck.core_utils"
-
-local function register_value(values_per_var, var, value)
-   if not values_per_var[var] then
-      values_per_var[var] = {}
-   end
-
-   table.insert(values_per_var[var], value)
-end
-
-local function add_resolution(item, var, value)
-   register_value(item.used_values, var, value)
-   value.used = true
-
-   if value.secondaries then
-      value.secondaries.used = true
-   end
-end
-
-local function in_scope(var, index)
-   return (var.scope_start <= index) and (index <= var.scope_end)
-end
-
--- Called when value of var is live at an item, maybe several times.
--- Registers value as live where variable is accessed or liveness propogation stops.
--- Stops when out of scope of variable, at another assignment to it or at an item
--- encountered already.
--- When stopping at a visited item, only save value if the item is in the current stack
--- of items, i.e. when propogation followed some path from it to previous item
-local function value_propogation_callback(line, stack, index, item, visited, var, value)
-   if not item then
-      register_value(line.last_live_values, var, value)
-      return true
-   end
-
-   if not visited[index] and item.accesses and item.accesses[var] then
-      add_resolution(item, var, value)
-   end
-
-   if stack[index] or (not visited[index] and (not in_scope(var, index) or item.set_variables and item.set_variables[var])) then
-      if not item.live_values then  
-         item.live_values = {}    
-      end
-
-      register_value(item.live_values, var, value)  
-      return true
-   end
-
-   if visited[index] then
-      return true
-   end
-
-   visited[index] = true
-end
-
--- For each node accessing variables, adds table {var = {values}} to field `used_values`.
--- A pair `var = {values}` in this table means that accessed local variable `var` can contain one of values `values`.
--- Values that can be accessed locally are marked as used.
-local function propogate_values(line)
-   -- {var = values} live at the end of line.   
-   line.last_live_values = {}
-
-   -- It is not very clever to simply propogate every single assigned value.
-   -- Fortunately, performance hit seems small (can be compenstated by inlining a few functions in lexer).
-   for i, item in ipairs(line.items) do
-      if item.set_variables then
-         for var, value in pairs(item.set_variables) do
-            if var.line == line then
-               -- Values are only live at the item after assignment.
-               core_utils.walk_line(line, i + 1, value_propogation_callback, {}, var, value)
-            end
-         end
-      end
-   end
-end
-
--- Called when closure (subline) is live at index.
--- Updates variable resolution:
--- When a closure accessing upvalue is live at item where a value of the variable is live,
--- the access can resolve to the value.
--- When a closure setting upvalue is live at item where the variable is accessed,
--- the access can resolve to the value.
--- Live values are only stored when their liveness ends. However, as closure propogation is unrestricted,
--- if there is an intermediate item where value is factually live and closure is live, closure will at some
--- point be propogated to where value liveness ends and is stored as live.
--- (Chances that I will understand this comment six months later: non-existent)
-local function closure_propogation_callback(line, _, item, subline)
-   local live_values    
-
-   if not item then
-      live_values = line.last_live_values
-   else   
-      live_values = item.live_values
-   end
-
-   if live_values then
-      for var, accessing_items in pairs(subline.accessed_upvalues) do
-         if var.line == line then
-            if live_values[var] then
-               for _, accessing_item in ipairs(accessing_items) do
-                  for _, value in ipairs(live_values[var]) do
-                     add_resolution(accessing_item, var, value)
-                  end
-               end
-            end
-         end
-      end
-   end
-
-   if not item then
-      return true
-   end
-
-   if item.accesses then
-      for var, setting_items in pairs(subline.set_upvalues) do
-         if var.line == line then
-            if item.accesses[var] then
-               for _, setting_item in ipairs(setting_items) do
-                  add_resolution(item, var, setting_item.set_variables[var])
-               end
-            end
-         end
-      end
-   end
-end
-
--- Updates variable resolution to account for closures and upvalues.
-local function propogate_closures(line)
-   for i, item in ipairs(line.items) do
-      if item.lines then
-         for _, subline in ipairs(item.lines) do
-            -- Closures are considered live at the item they are created.
-            core_utils.walk_line_once(line, {}, i, closure_propogation_callback, subline)
-         end
-      end
-   end
-
-   -- It is assumed that all closures are live at the end of the line.
-   -- Therefore, all accesses and sets inside closures can resolve to each other.
-   for _, subline in ipairs(line.lines) do
-      for var, accessing_items in pairs(subline.accessed_upvalues) do
-         if var.line == line then
-            for _, accessing_item in ipairs(accessing_items) do
-               for _, another_subline in ipairs(line.lines) do
-                  if another_subline.set_upvalues[var] then
-                     for _, setting_item in ipairs(another_subline.set_upvalues[var]) do
-                        add_resolution(accessing_item, var, setting_item.set_variables[var])
-                     end
-                  end
-               end
-            end
-         end
-      end
-   end
-end
-
-local function analyze_line(line)
-   propogate_values(line)
-   propogate_closures(line)
-end
-
--- Emits warnings for variable.
-local function check_var(chstate, var)
-   if #var.values == 1 then
-      if not var.values[1].used then
-         chstate:warn_unused_variable(var)
-      elseif var.values[1].empty then
-         var.empty = true
-         chstate:warn_unset(var)
-      end
-   elseif not var.accessed then
-      chstate:warn_unaccessed(var)
-   else
-      for _, value in ipairs(var.values) do
-         if (not value.used) and (not value.empty) then
-            chstate:warn_unused_value(value)
-         end
-      end
-   end
-end
-
--- Emits warnings for unused variables and values and unset variables in line.
-local function check_for_warnings(chstate, line)
-   for _, item in ipairs(line.items) do
-      if item.tag == "Local" then
-         for var in pairs(item.set_variables) do
-            -- Do not check implicit top level vararg.
-            if var.location then
-               check_var(chstate, var)
-            end
-         end
-      end
-   end
-end
-
--- Finds reaching assignments for all variable accesses.
--- Emits warnings: unused variable, unused value, unset variable.
-local function analyze(chstate, line)
-   analyze_line(line)
-
-   for _, nested_line in ipairs(line.lines) do
-      analyze_line(nested_line)
-   end
-
-   check_for_warnings(chstate, line)
-
-   for _, nested_line in ipairs(line.lines) do
-      check_for_warnings(chstate, nested_line)
-   end
-end
-
-return analyze
-]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.reachability"])sources["luacheck.reachability"]=([===[-- <pack luacheck.reachability> --
-local core_utils = require "luacheck.core_utils"
-
-local reachability
-
-local function noop_callback() end
-
-local function reachability_callback(_, _, item, chstate)
-   if not item then
-      return true
-   end
-
-   if item.lines then
-      for _, subline in ipairs(item.lines) do
-         reachability(chstate, subline)
-      end
-   end
-
-   if item.accesses then
-      for var, accessing_nodes in pairs(item.accesses) do
-         local possible_values = item.used_values[var]
-
-         if not var.empty and (#possible_values == 1) and possible_values[1].empty then
-            for _, accessing_node in ipairs(accessing_nodes) do
-               chstate:warn_uninit(accessing_node)
-            end
-         end
-      end
-   end
-end
-
--- Emits warnings: unreachable code, uninitialized access.
-function reachability(chstate, line)
-   local reachable_indexes = {}
-   core_utils.walk_line_once(line, reachable_indexes, 1, reachability_callback, chstate)
-
-   for i, item in ipairs(line.items) do
-      if not reachable_indexes[i] then
-         if item.location then
-            chstate:warn_unreachable(item.location, item.loop_end, item.token)
-            core_utils.walk_line_once(line, reachable_indexes, i, noop_callback)
-         end
-      end
-   end
-end
-
-return reachability
-]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.core_utils"])sources["luacheck.core_utils"]=([===[-- <pack luacheck.core_utils> --
-local core_utils = {}
-
--- Calls callback with line, stack_set, index, item, ... for each item reachable from starting item.
--- `stack_set` is a set of indices of items in current propogation path from root, excluding current item.
--- Callback can return true to stop walking from current item.
-function core_utils.walk_line(line, index, callback, ...)
-   local stack = {}
-   local stack_set = {}
-   local backlog = {}
-   local level = 0
-
-   while index do
-      local item = line.items[index]
-
-      if not callback(line, stack_set, index, item, ...) and item then
-         level = level + 1
-         stack[level] = index
-         stack_set[index] = true
-
-         if item.tag == "Jump" then
-            index = item.to
-         elseif item.tag == "Cjump" then
-            backlog[level] = index + 1
-            index = item.to
-         else
-            index = index + 1
-         end
+   function fs.is_file(path)
+      local fh = io.open(path)
+
+      if fh then
+         fh:close()
+         return true
       else
-         while level > 0 and not backlog[level] do
-            stack_set[stack[level]] = nil
-            level = level - 1
-         end
-
-         index = backlog[level]
-         backlog[level] = nil
+         return false
       end
    end
-end
 
-local function once_per_item_callback_adapter(line, _, index, item, visited, callback, ...)
-   if visited[index] then
-      return true
+   function fs.extract_files(_, _)
+      return {}
    end
 
-   visited[index] = true
-   return callback(line, index, item, ...)
+   function fs.mtime(_)
+      return 0
+   end
+
+   local pwd_command = utils.is_windows and "cd" or "pwd"
+
+   function fs.current_dir()
+      local fh = io.popen(pwd_command)
+      local current_dir = fh:read("*a")
+      fh:close()
+      -- Remove extra newline at the end.
+      return ensure_dir_sep(current_dir:sub(1, -2))
+   end
+
+   return fs
 end
 
--- Calls callback with line, index, item, ... for each item reachable from starting item once.
--- `visited` is a set of already visited indexes.
--- Callback can return true to stop walking from current item.
-function core_utils.walk_line_once(line, visited, index, callback, ...)
-   return core_utils.walk_line(line, index, once_per_item_callback_adapter, visited, callback, ...)
+-- Returns whether path points to a directory. 
+function fs.is_dir(path)
+   return fs.lfs.attributes(path, "mode") == "directory"
 end
 
--- Given a "global set" warning, return whether it is an implicit definition.
-function core_utils.is_definition(opts, warning)
-   return opts.allow_defined or (opts.allow_defined_top and warning.top)
+-- Returns whether path points to a file. 
+function fs.is_file(path)
+   return fs.lfs.attributes(path, "mode") == "file"
 end
 
-local function location_comparator(event1, event2)
-   -- If two events share location, neither can be an invalid comment event.
-   -- However, they can be equal by identity due to the way table.sort is implemented.
-   return event1.line < event2.line or
-      event1.line == event2.line and (event1.column < event2.column or
-      event1.column == event2.column and event1.code and event1.code < event2.code)
+-- Returns list of all files in directory matching pattern. 
+function fs.extract_files(dir_path, pattern)
+   local res = {}
+
+   local function scan(dir)
+      for path in fs.lfs.dir(dir) do
+         if path ~= "." and path ~= ".." then
+            local full_path = dir .. utils.dir_sep .. path
+
+            if fs.is_dir(full_path) then
+               scan(full_path)
+            elseif path:match(pattern) and fs.is_file(full_path) then
+               table.insert(res, full_path)
+            end
+         end
+      end
+   end
+
+   scan(dir_path)
+   table.sort(res)
+   return res
 end
 
-function core_utils.sort_by_location(array)
-   table.sort(array, location_comparator)
+-- Returns modification time for a file. 
+function fs.mtime(path)
+   return fs.lfs.attributes(path, "modification")
 end
 
-return core_utils
+-- Returns absolute path to current working directory.
+function fs.current_dir()
+   return ensure_dir_sep(assert(fs.lfs.currentdir()))
+end
+
+return fs
 ]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.version"])sources["luacheck.version"]=([===[-- <pack luacheck.version> --
-local luacheck = require "luacheck"
-local fs = require "luacheck.fs"
-local multithreading = require "luacheck.multithreading"
-
-local version = {}
-
-version.luacheck = luacheck._VERSION
-
-if rawget(_G, "jit") then
-   version.lua = rawget(_G, "jit").version
-else
-   version.lua = _VERSION
-end
-
-if fs.has_lfs then
-   version.lfs = fs.lfs._VERSION
-else
-   version.lfs = "Not found"
-end
-
-if multithreading.has_lanes then
-   version.lanes = multithreading.lanes.ABOUT.version
-else
-   version.lanes = "Not found"
-end
-
-version.string = ([[
-Luacheck: %s
-Lua: %s
-LuaFileSystem: %s
-LuaLanes: %s]]):format(version.luacheck, version.lua, version.lfs, version.lanes)
-
-return version
-]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.format"])sources["luacheck.format"]=([===[-- <pack luacheck.format> --
+assert(not sources["luacheck.format"],"module already exists")sources["luacheck.format"]=([===[-- <pack luacheck.format> --
 local utils = require "luacheck.utils"
 
 local format = {}
@@ -5188,294 +4507,1225 @@ end
 
 return format
 ]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.utils"])sources["luacheck.utils"]=([===[-- <pack luacheck.utils> --
-local utils = {}
+assert(not sources["luacheck.filter"],"module already exists")sources["luacheck.filter"]=([===[-- <pack luacheck.filter> --
+local options = require "luacheck.options"
+local core_utils = require "luacheck.core_utils"
+local utils = require "luacheck.utils"
 
-utils.dir_sep = package.config:sub(1,1)
-utils.is_windows = utils.dir_sep == "\\"
+local filter = {}
 
-local bom = "\239\187\191"
+-- Returns array of normalized options, one for each file.
+local function get_normalized_opts(report, opts)
+   local res = {}
 
--- Returns all contents of file (path or file handler) or nil. 
-function utils.read_file(file)
-   local handler
+   for i in ipairs(report) do
+      local option_stack = {opts}
 
-   if type(file) == "string" then
-      handler = io.open(file, "rb")
+      if opts and opts[i] then
+         option_stack[2] = opts[i]
 
-      if not handler then
-         return nil
+         for _, nested_opts in ipairs(opts[i]) do
+            table.insert(option_stack, nested_opts)
+         end
       end
-   else
-      handler = file
-   end
 
-   local res = handler:read("*a")
-   handler:close()
-
-   -- Use :len() instead of # operator because in some environments
-   -- string library is patched to handle UTF.
-   if res and res:sub(1, bom:len()) == bom then
-      res = res:sub(bom:len() + 1)
+      res[i] = options.normalize(option_stack)
    end
 
    return res
 end
 
--- luacheck: push
--- luacheck: compat
-if _VERSION:find "5.1" then
-   -- Loads Lua source string in an environment, returns function or nil, error.
-   function utils.load(src, env, chunkname)
-      local func, err = loadstring(src, chunkname)
+-- A global is implicitly defined in a file if opts.allow_defined == true and it is set anywhere in the file,
+--    or opts.allow_defined_top == true and it is set in the top level function scope.
+-- By default, accessing and setting globals in a file is allowed for explicitly defined globals (standard and custom)
+--    for that file and implicitly defined globals from that file and all other files except modules (files with opts.module == true).
+-- Accessing other globals results in "accessing undefined variable" warning.
+-- Setting other globals results in "setting non-standard global variable" warning.
+-- Unused implicitly defined global results in "unused global variable" warning.
+-- For modules, accessing globals uses same rules as normal files, however, setting globals is only allowed for implicitly defined globals
+--    from the module.
+-- Setting a global not defined in the module results in "setting non-module global variable" warning.
 
-      if func then
-         if env then
-            setfenv(func, env)
+-- Extracts sets of defined, exported and used globals from a file report.
+local function get_defined_and_used_globals(file_report, opts)
+   local defined, globally_defined, used = {}, {}, {}
+
+   for _, warning in ipairs(file_report) do
+      if warning.code:match("11.") then
+         if warning.code == "111" then
+            if (opts.inline and warning.definition) or core_utils.is_definition(opts, warning) then
+               if (opts.inline and warning.in_module) or opts.module then
+                  defined[warning.name] = true
+               else
+                  globally_defined[warning.name] = true
+               end
+            end
+         else
+            used[warning.name] = true
          end
-
-         return func
-      else
-         return nil, err
       end
    end
-else
-   -- Loads Lua source string in an environment, returns function or nil, error.
-   function utils.load(src, env, chunkname)
-      return load(src, chunkname, "t", env or _ENV)
+
+   return defined, globally_defined, used
+end
+
+
+-- Returns {globally_defined = globally_defined, globally_used = globally_used, locally_defined = locally_defined},
+--    where `globally_defined` is set of globals defined across all files except modules,
+--    where `globally_used` is set of globals defined across all files except modules,
+--    where `locally_defined` is an array of sets of globals defined per file.
+local function get_implicit_defs_info(report, opts)
+   local info = {
+      globally_defined = {},
+      globally_used = {},
+      locally_defined = {}
+   }
+
+   for i, file_report in ipairs(report) do
+      local defined, globally_defined, used = get_defined_and_used_globals(file_report, opts[i])
+      utils.update(info.globally_defined, globally_defined)
+      utils.update(info.globally_used, used)
+      info.locally_defined[i] = defined
+   end
+
+   return info
+end
+
+-- Returns file report clear of implicit definitions.
+local function filter_implicit_defs_file(file_report, opts, globally_defined, globally_used, locally_defined)
+   local res = {}
+
+   for _, warning in ipairs(file_report) do
+      if warning.code:match("11.") then
+         if warning.code == "111" then
+            if (opts.inline and warning.in_module) or opts.module then
+               if not locally_defined[warning.name] then
+                  warning.module = true
+                  table.insert(res, warning)
+               end
+            else
+               if (opts.inline and  warning.definition) or core_utils.is_definition(opts, warning) then
+                  if not globally_used[warning.name] then
+                     warning.code = "131"
+                     warning.top = nil
+                     table.insert(res, warning)
+                  end
+               else
+                  if not globally_defined[warning.name] then
+                     table.insert(res, warning)
+                  end
+               end
+            end
+         else
+            if not globally_defined[warning.name] and not locally_defined[warning.name] then
+               table.insert(res, warning)
+            end
+         end
+      else
+         table.insert(res, warning)
+      end
+   end
+
+   return res
+end
+
+-- Returns report clear of implicit definitions.
+local function filter_implicit_defs(report, opts)
+   local res = {}
+   local info = get_implicit_defs_info(report, opts)
+
+   for i, file_report in ipairs(report) do
+      if not file_report.fatal then
+         res[i] = filter_implicit_defs_file(file_report, opts[i], info.globally_defined, info.globally_used, info.locally_defined[i])
+      else
+         res[i] = file_report
+      end
+   end
+
+   return res
+end
+
+-- Returns two optional booleans indicating if warning matches pattern by code and name.
+local function match(warning, pattern)
+   local matches_code, matches_name
+   local code_pattern, name_pattern = pattern[1], pattern[2]
+
+   if code_pattern then
+      matches_code = utils.pmatch(warning.code, code_pattern)
+   end
+
+   if name_pattern then
+      if warning.code:match("5..") then
+         -- Statement-related warnings can't match by name.
+         matches_name = false
+      else
+         matches_name = utils.pmatch(warning.name, name_pattern)
+      end
+   end
+
+   return matches_code, matches_name
+end
+
+local function is_enabled(rules, warning)
+   -- A warning is enabled when its code and name are enabled.
+   local enabled_code, enabled_name = false, false
+
+   for _, rule in ipairs(rules) do
+      local matches_one = false
+
+      for _, pattern in ipairs(rule[1]) do
+         local matches_code, matches_name = match(warning, pattern)
+
+         -- If a factor is enabled, warning can't be disable by it.
+         if enabled_code then
+            matches_code = rule[2] ~= "disable"
+         end
+
+         if enabled_name then
+            matches_code = rule[2] ~= "disable"
+         end
+
+         if (matches_code and matches_name ~= false) or
+               (matches_name and matches_code ~= false) then
+            matches_one = true
+         end
+
+         if rule[2] == "enable" then
+            if matches_code then
+               enabled_code = true
+            end
+
+            if matches_name then
+               enabled_name = true
+            end
+
+            if enabled_code and enabled_name then
+               -- Enable as matching to some `enable` pattern by code and to other by name.
+               return true
+            end
+         elseif rule[2] == "disable" then
+            if matches_one then
+               -- Disable as matching to `disable` pattern.
+               return false
+            end
+         end
+      end
+
+      if rule[2] == "only" and not matches_one then
+         -- Disable as not matching to any of `only` patterns.
+         return false
+      end
+   end
+
+   -- Enable by default.
+   return true
+end
+
+function filter.filters(opts, warning)
+   if warning.code:match("[234]..") and warning.name == "_" then
+      return true
+   end
+
+   if warning.code:match("11.") and not warning.module and opts.globals[warning.name] then
+      return true
+   end
+
+   if warning.secondary and not opts.unused_secondaries then
+      return true
+   end
+
+   if warning.self and not opts.self then
+      return true
+   end
+
+   return not is_enabled(opts.rules, warning)
+end
+
+local function filter_file_report(report, opts)
+   local res = {}
+
+   for _, event in ipairs(report) do
+      if ((opts.inline and event.read_only) or event.code:match("11[12]")
+            and not event.module and opts.read_globals[event.name]) and not (
+               (opts.inline and event.global) or (opts.globals[event.name] and not opts.read_globals[event.name])) then
+         event.code = "12" .. event.code:sub(3, 3)
+      end
+
+      if event.code == "011" or (event.code:match("02.") and opts.inline) or (event.code:sub(1, 1) ~= "0" and (not event.filtered and
+            not event["filtered_" .. event.code] or not opts.inline) and not filter.filters(opts, event)) then
+         table.insert(res, event)
+      end
+   end
+
+   return res
+end
+
+-- Assumes `opts` are normalized. 
+local function filter_report(report, opts)
+   local res = {}
+
+   for i, file_report in ipairs(report) do
+      if not file_report.fatal then
+         res[i] = filter_file_report(file_report, opts[i])
+      else
+         res[i] = file_report
+      end
+   end
+
+   return res
+end
+
+-- Removes warnings from report that do not match options. 
+-- `opts[i]`, if present, is used as options when processing `report[i]`
+-- together with options in its array part. 
+function filter.filter(report, opts)
+   opts = get_normalized_opts(report, opts)
+   report = filter_implicit_defs(report, opts)
+   return filter_report(report, opts)
+end
+
+return filter
+]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
+assert(not sources["luacheck.expand_rockspec"],"module already exists")sources["luacheck.expand_rockspec"]=([===[-- <pack luacheck.expand_rockspec> --
+local utils = require "luacheck.utils"
+
+local function extract_lua_files(rockspec)
+   local res = {}
+   local build = rockspec.build
+
+   local function scan(t)
+      for _, file in pairs(t) do
+         if type(file) == "string" and file:sub(-#".lua") == ".lua" then
+            table.insert(res, file)
+         end
+      end
+   end
+
+   if build.type == "builtin" then
+      scan(build.modules)
+   end
+
+   if build.install then
+      if build.install.lua then
+         scan(build.install.lua)
+      end
+
+      if build.install.bin then
+         scan(build.install.bin)
+      end
+   end
+
+   table.sort(res)
+   return res
+end
+
+-- Receives a name of a rockspec, returns list of related .lua files or nil and "syntax" or "error". 
+local function expand_rockspec(file)
+   local rockspec, err = utils.load_config(file)
+
+   if not rockspec then
+      return nil, err
+   end
+
+   local ok, files = pcall(extract_lua_files, rockspec)
+
+   if not ok then
+      return nil, "syntax"
+   end
+
+   return files
+end
+
+return expand_rockspec
+]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
+assert(not sources["luacheck.core_utils"],"module already exists")sources["luacheck.core_utils"]=([===[-- <pack luacheck.core_utils> --
+local core_utils = {}
+
+-- Calls callback with line, stack_set, index, item, ... for each item reachable from starting item.
+-- `stack_set` is a set of indices of items in current propogation path from root, excluding current item.
+-- Callback can return true to stop walking from current item.
+function core_utils.walk_line(line, index, callback, ...)
+   local stack = {}
+   local stack_set = {}
+   local backlog = {}
+   local level = 0
+
+   while index do
+      local item = line.items[index]
+
+      if not callback(line, stack_set, index, item, ...) and item then
+         level = level + 1
+         stack[level] = index
+         stack_set[index] = true
+
+         if item.tag == "Jump" then
+            index = item.to
+         elseif item.tag == "Cjump" then
+            backlog[level] = index + 1
+            index = item.to
+         else
+            index = index + 1
+         end
+      else
+         while level > 0 and not backlog[level] do
+            stack_set[stack[level]] = nil
+            level = level - 1
+         end
+
+         index = backlog[level]
+         backlog[level] = nil
+      end
    end
 end
--- luacheck: pop
 
--- Loads config containing assignments to global variables from path. 
--- Returns config table and return value of config or nil and error message
--- ("I/O" or "syntax" or "runtime"). 
-function utils.load_config(path, env)
-   env = env or {}
+local function once_per_item_callback_adapter(line, _, index, item, visited, callback, ...)
+   if visited[index] then
+      return true
+   end
+
+   visited[index] = true
+   return callback(line, index, item, ...)
+end
+
+-- Calls callback with line, index, item, ... for each item reachable from starting item once.
+-- `visited` is a set of already visited indexes.
+-- Callback can return true to stop walking from current item.
+function core_utils.walk_line_once(line, visited, index, callback, ...)
+   return core_utils.walk_line(line, index, once_per_item_callback_adapter, visited, callback, ...)
+end
+
+-- Given a "global set" warning, return whether it is an implicit definition.
+function core_utils.is_definition(opts, warning)
+   return opts.allow_defined or (opts.allow_defined_top and warning.top)
+end
+
+local function location_comparator(event1, event2)
+   -- If two events share location, neither can be an invalid comment event.
+   -- However, they can be equal by identity due to the way table.sort is implemented.
+   return event1.line < event2.line or
+      event1.line == event2.line and (event1.column < event2.column or
+      event1.column == event2.column and event1.code and event1.code < event2.code)
+end
+
+function core_utils.sort_by_location(array)
+   table.sort(array, location_comparator)
+end
+
+return core_utils
+]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
+assert(not sources["luacheck.config"],"module already exists")sources["luacheck.config"]=([===[-- <pack luacheck.config> --
+local options = require "luacheck.options"
+local stds = require "luacheck.stds"
+local fs = require "luacheck.fs"
+local utils = require "luacheck.utils"
+
+local config = {}
+
+-- Config must support special metatables for some keys:
+-- autovivification for `files`, fallback to built-in stds for `stds`.
+
+local special_mts = {
+   stds = {__index = stds},
+   files = {__index = function(files, key)
+      files[key] = {}
+      return files[key]
+   end}
+}
+
+local function make_config_env_mt()
+   local env_mt = {}
+   local special_values = {}
+
+   for key, mt in pairs(special_mts) do
+      special_values[key] = setmetatable({}, mt)
+   end
+
+   function env_mt.__index(_, key)
+      if special_mts[key] then
+         return special_values[key]
+      else
+         return _G[key]
+      end
+   end
+
+   function env_mt.__newindex(env, key, value)
+      if special_mts[key] then
+         if type(value) == "table" then
+            setmetatable(value, special_mts[key])
+         end
+
+         special_values[key] = value
+      else
+         rawset(env, key, value)
+      end
+   end
+
+   return env_mt, special_values
+end
+
+local function make_config_env()
+   local mt, special_values = make_config_env_mt()
+   return setmetatable({}, mt), special_values
+end
+
+local function remove_env_mt(env, special_values)
+   setmetatable(env, nil)
+   utils.update(env, special_values)
+end
+
+local top_options = {
+   color = utils.has_type("boolean"),
+   codes = utils.has_type("boolean"),
+   formatter = utils.either(utils.has_type("string"), utils.has_type("function")),
+   cache = utils.either(utils.has_type("string"), utils.has_type("boolean")),
+   jobs = function(x) return type(x) == "number" and math.floor(x) == x and x >= 1 end,
+   files = utils.has_type("table"),
+   stds = utils.has_type("table"),
+   exclude_files = utils.array_of("string"),
+   include_files = utils.array_of("string")
+}
+
+utils.update(top_options, options.all_options)
+options.add_order(top_options)
+
+-- Returns error or nil if options are valid.
+local function validate_options(option_set, opts)
+   local ok, invalid_field = options.validate(option_set, opts)
+
+   if not ok then
+      if invalid_field then
+         return ("invalid value of option '%s'"):format(invalid_field)
+      else
+         return "validation error"
+      end
+   end
+end
+
+-- Returns error or nil if config is valid.
+local function validate_config(conf)
+   local top_err = validate_options(top_options, conf)
+
+   if top_err then
+      return top_err
+   end
+
+   for path, opts in pairs(conf.files) do
+      if type(path) == "string" then
+         local override_err = validate_options(options.all_options, opts)
+
+         if override_err then
+            return ("%s in options for path '%s'"):format(override_err, path)
+         end
+      end
+   end
+end
+
+-- Returns table with field `paths` containing sorted normalize paths
+-- used in overrides and `options` mapping these paths to options.
+local function normalize_overrides(files, abs_conf_dir)
+   local overrides = {paths = {}, options = {}}
+
+   local orig_paths = {}
+
+   for path in pairs(files) do
+      table.insert(orig_paths, path)
+   end
+
+   table.sort(orig_paths)
+
+   for _, orig_path in ipairs(orig_paths) do
+      local path = fs.normalize(fs.join(abs_conf_dir, orig_path))
+
+      if not overrides.options[path] then
+         table.insert(overrides.paths, path)
+      end
+
+      overrides.options[path] = files[orig_path]
+   end
+
+   table.sort(overrides.paths)
+   return overrides
+end
+
+local function try_load(path)
    local src = utils.read_file(path)
 
    if not src then
-      return nil, "I/O"
+      return
    end
 
-   local func = utils.load(src, env)
+   local func, err = utils.load(src, nil, "@"..path)
+   return err or func
+end
+
+local function add_relative_loader(conf)
+   local function loader(modname)
+      local modpath = fs.join(conf.rel_dir, modname:gsub("%.", utils.dir_sep))
+      return try_load(modpath..".lua") or try_load(modpath..utils.dir_sep.."init.lua"), modname
+   end
+
+   table.insert(package.loaders or package.searchers, 1, loader)
+   return loader
+end
+
+local function remove_relative_loader(loader)
+   for i, func in ipairs(package.loaders or package.searchers) do
+      if func == loader then
+         table.remove(package.loaders or package.searchers, i)
+         return
+      end
+   end
+end
+
+config.default_path = ".luacheckrc"
+config.empty_config = {empty = true}
+
+-- Loads config from path, returns config object or nil and error message.
+function config.load_config(path)
+   local is_default_path = not path
+   path = path or config.default_path
+
+   local current_dir = fs.current_dir()
+   local abs_conf_dir, rel_conf_dir = fs.find_file(current_dir, path)
+
+   if not abs_conf_dir then
+      if is_default_path then
+         return config.empty_config
+      else
+         return nil, "Couldn't find configuration file "..path
+      end
+   end
+
+   local conf = {
+      abs_dir = abs_conf_dir,
+      rel_dir = rel_conf_dir,
+      cur_dir = current_dir
+   }
+
+   local conf_path = fs.join(rel_conf_dir, path)
+   local env, special_values = make_config_env()
+   local loader = add_relative_loader(conf)
+   local load_ok, ret = utils.load_config(conf_path, env)
+   remove_relative_loader(loader)
+
+   if not load_ok then
+      return nil, ("Couldn't load configuration from %s: %s error"):format(conf_path, ret)
+   end
+
+   -- Support returning some options from config instead of setting them as globals.
+   -- This allows easily loading options from another file, for example using require.
+   if type(ret) == "table" then
+      utils.update(env, ret)
+   end
+
+   remove_env_mt(env, special_values)
+
+   -- Update stds before validating config - std validation relies on that.
+   if type(env.stds) == "table" then
+      -- Ideally config shouldn't mutate global stds, not if `luacheck.config` becomes public
+      -- interface.
+      utils.update(stds, env.stds)
+   end
+
+   local err = validate_config(env)
+
+   if err then
+      return nil, ("Couldn't load configuration from %s: %s"):format(conf_path, err)
+   end
+
+   conf.options = env
+   conf.overrides = normalize_overrides(env.files, abs_conf_dir)
+   return conf
+end
+
+-- Adjusts path starting from config dir to start from current directory.
+function config.relative_path(conf, path)
+   if conf.empty then
+      return path
+   else
+      return fs.join(conf.rel_dir, path)
+   end
+end
+
+-- Requires module from config directory.
+-- Returns success flag and module or error message.
+function config.relative_require(conf, modname)
+   local loader
+
+   if not conf.empty then
+      loader = add_relative_loader(conf)
+   end
+
+   local ok, mod_or_err = pcall(require, modname)
+
+   if not conf.empty then
+      remove_relative_loader(loader)
+   end
+
+   return ok, mod_or_err
+end
+
+-- Returns top-level options.
+function config.get_top_options(conf)
+   return conf.empty and {} or conf.options
+end
+
+-- Returns array of options for a file.
+function config.get_options(conf, file)
+   if conf.empty then
+      return {}
+   end
+
+   local res = {conf.options}
+
+   if type(file) ~= "string" then
+      return res
+   end
+
+   local path = fs.normalize(fs.join(conf.cur_dir, file))
+
+   for _, override_path in ipairs(conf.overrides.paths) do
+      if fs.is_subpath(override_path, path) then
+         table.insert(res, conf.overrides.options[override_path])
+      end
+   end
+
+   return res
+end
+
+return config
+]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
+assert(not sources["luacheck.check"],"module already exists")sources["luacheck.check"]=([===[-- <pack luacheck.check> --
+local parse = require "luacheck.parser"
+local linearize = require "luacheck.linearize"
+local analyze = require "luacheck.analyze"
+local reachability = require "luacheck.reachability"
+local handle_inline_options = require "luacheck.inline_options"
+local core_utils = require "luacheck.core_utils"
+local utils = require "luacheck.utils"
+
+local function is_secondary(value)
+   return value.secondaries and value.secondaries.used
+end
+
+local ChState = utils.class()
+
+function ChState:__init()
+   self.warnings = {}
+end
+
+function ChState:warn(warning, implicit_self)
+   if not warning.end_column then
+      warning.end_column = implicit_self and warning.column or (warning.column + #warning.name - 1)
+   end
+
+   table.insert(self.warnings, warning)
+end
+
+local action_codes = {
+   set = 1,
+   mutate = 2,
+   access = 3
+}
+
+local type_codes = {
+   var = 1,
+   func = 1,
+   arg = 2,
+   loop = 3,
+   loopi = 3
+}
+
+function ChState:warn_global(node, action, is_top)
+   self:warn({
+      code = "11" .. action_codes[action],
+      name = node[1],
+      line = node.location.line,
+      column = node.location.column,
+      top = is_top and (action == "set") or nil
+   })
+end
+
+-- W12* (read-only global) and W131 (unused global) are patched in during filtering.
+
+function ChState:warn_unused_variable(var)
+   self:warn({
+      code = "21" .. type_codes[var.type],
+      name = var.name,
+      line = var.location.line,
+      column = var.location.column,
+      secondary = is_secondary(var.values[1]) or nil,
+      func = (var.values[1].type == "func") or nil,
+      self = var.self
+   }, var.self)
+end
+
+function ChState:warn_unset(var)
+   self:warn({
+      code = "221",
+      name = var.name,
+      line = var.location.line,
+      column = var.location.column
+   })
+end
+
+function ChState:warn_unaccessed(var)
+   -- Mark as secondary if all assigned values are secondary.
+   -- It is guaranteed that there are at least two values.
+   local secondary = true
+
+   for _, value in ipairs(var.values) do
+      if not value.empty and not is_secondary(value) then
+         secondary = nil
+         break
+      end
+   end
+
+   self:warn({
+      code = "23" .. type_codes[var.type],
+      name = var.name,
+      line = var.location.line,
+      column = var.location.column,
+      secondary = secondary
+   }, var.self)
+end
+
+function ChState:warn_unused_value(value)
+   self:warn({
+      code = "31" .. type_codes[value.type],
+      name = value.var.name,
+      line = value.location.line,
+      column = value.location.column,
+      secondary = is_secondary(value) or nil
+   }, value.type == "arg" and value.var.self)
+end
+
+function ChState:warn_uninit(node)
+   self:warn({
+      code = "321",
+      name = node[1],
+      line = node.location.line,
+      column = node.location.column
+   })
+end
+
+function ChState:warn_redefined(var, prev_var, same_scope)
+   if var.name ~= "..." then
+      self:warn({
+         code = "4" .. (same_scope and "1" or (var.line == prev_var.line and "2" or "3")) .. type_codes[prev_var.type],
+         name = var.name,
+         line = var.location.line,
+         column = var.location.column,
+         self = var.self and prev_var.self,
+         prev_line = prev_var.location.line,
+         prev_column = prev_var.location.column
+      }, var.self)
+   end
+end
+
+function ChState:warn_unreachable(location, unrepeatable, token)
+   self:warn({
+      code = "51" .. (unrepeatable and "2" or "1"),
+      line = location.line,
+      column = location.column,
+      end_column = location.column + #token - 1
+   })
+end
+
+function ChState:warn_unused_label(label)
+   self:warn({
+      code = "521",
+      name = label.name,
+      line = label.location.line,
+      column = label.location.column,
+      end_column = label.end_column
+   })
+end
+
+function ChState:warn_unbalanced(location, shorter_lhs)
+   -- Location points to `=`.
+   self:warn({
+      code = "53" .. (shorter_lhs and "1" or "2"),
+      line = location.line,
+      column = location.column,
+      end_column = location.column
+   })
+end
+
+function ChState:warn_empty_block(location, do_end)
+   -- Location points to `do`, `then` or `else`.
+   self:warn({
+      code = "54" .. (do_end and "1" or "2"),
+      line = location.line,
+      column = location.column,
+      end_column = location.column + (do_end and 1 or 3)
+   })
+end
+
+local function check_or_throw(src)
+   local ast, comments, code_lines = parse(src)
+   local chstate = ChState()
+   local line = linearize(chstate, ast)
+   analyze(chstate, line)
+   reachability(chstate, line)
+   handle_inline_options(ast, comments, code_lines, chstate.warnings)
+   core_utils.sort_by_location(chstate.warnings)
+   return chstate.warnings
+end
+
+--- Checks source.
+-- Returns an array of warnings and errors. Codes for errors start with "0".
+-- Syntax errors (with code "011") have message stored in .msg field.
+local function check(src)
+   local warnings, err = utils.pcall(check_or_throw, src)
+
+   if warnings then
+      return warnings
+   else
+      local syntax_error = {
+         code = "011",
+         line = err.line,
+         column = err.column,
+         end_column = err.end_column,
+         msg = err.msg
+      }
+
+      return {syntax_error}
+   end
+end
+
+return check
+]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
+assert(not sources["luacheck.cache"],"module already exists")sources["luacheck.cache"]=([===[-- <pack luacheck.cache> --
+local utils = require "luacheck.utils"
+
+local cache = {}
+
+-- Cache file contains check results for n unique filenames.
+-- Cache file consists of 3n+2 lines, the first line is empty and the second is cache format version.
+-- The rest are contain file records, 3 lines per file.
+-- For each file, first line is the filename, second is modification time,
+-- third is check result in lua table format.
+-- String fields are compressed into array indexes.
+
+cache.format_version = 1
+
+local fields = {
+   "code", "name", "line", "column", "end_column", "prev_line", "prev_column", "secondary",
+   "self", "func", "filtered", "top", "read_only", "global", "filtered_111", "filtered_121",
+   "filtered_131", "filtered_112", "filtered_122", "filtered_113","definition", "in_module", "msg"
+}
+
+-- Converts table with fields into table with indexes.
+local function compress(t)
+   local res = {}
+
+   for index, field in ipairs(fields) do
+      res[index] = t[field]
+   end
+
+   return res
+end
+
+local function get_local_name(index)
+   return string.char(index + (index > 26 and 70 or 64))
+end
+
+-- Serializes event into buffer.
+-- strings is a table mapping string values to where they first occured or to name of local
+-- variable used to represent it.
+-- Array part contains representations of values saved into locals.
+local function serialize_event(buffer, strings, event)
+   event = compress(event)
+   table.insert(buffer, "{")
+   local is_sparse
+   local put_one
+
+   for i = 1, #fields do
+      local value = event[i]
+
+      if not value then
+         is_sparse = true
+      else
+         if put_one then
+            table.insert(buffer, ",")
+         end
+
+         put_one = true
+
+         if is_sparse then
+            table.insert(buffer, ("[%d]="):format(i))
+         end
+
+         if type(value) == "string" then
+            local prev = strings[value]
+
+            if type(prev) == "string" then
+               -- There is a local with such value.
+               table.insert(buffer, prev)
+            elseif type(prev) == "number" and #strings < 52 then
+               -- Value is used second time, put it into a local.
+               table.insert(strings, ("%q"):format(value))
+               local local_name = get_local_name(#strings)
+               buffer[prev] = local_name
+               table.insert(buffer, local_name)
+               strings[value] = local_name
+            else
+               table.insert(buffer, ("%q"):format(value))
+               strings[value] = #buffer
+            end
+         else
+            table.insert(buffer, tostring(value))
+         end
+      end
+   end
+
+   table.insert(buffer, "}")
+end
+
+-- Serializes check result into a string.
+function cache.serialize(events)
+   local strings = {}
+   local buffer = {"", "return {"}
+
+   for i, event in ipairs(events) do
+      if i > 1 then
+         table.insert(buffer, ",")
+      end
+
+      serialize_event(buffer, strings, event)
+   end
+
+   table.insert(buffer, "}")
+
+   if strings[1] then
+      local names = {}
+
+      for index in ipairs(strings) do
+         table.insert(names, get_local_name(index))
+      end
+
+      buffer[1] = "local " .. table.concat(names, ",") .. "=" .. table.concat(strings, ",") .. ";"
+   end
+
+   return table.concat(buffer)
+end
+
+-- Returns array of triplets of lines from cache fh.
+local function read_triplets(fh)
+   local res = {}
+
+   while true do
+      local filename = fh:read()
+
+      if filename then
+         local mtime = fh:read() or ""
+         local cached = fh:read() or ""
+         table.insert(res, {filename, mtime, cached})
+      else
+         break
+      end
+   end
+
+   return res
+end
+
+-- Writes cache triplets into fh.
+local function write_triplets(fh, triplets)
+   for _, triplet in ipairs(triplets) do
+      fh:write(triplet[1], "\n")
+      fh:write(triplet[2], "\n")
+      fh:write(triplet[3], "\n")
+   end
+end
+
+-- Converts table with indexes into table with fields.
+local function decompress(t)
+   local res = {}
+
+   for index, field in ipairs(fields) do
+      res[field] = t[index]
+   end
+
+   return res
+end
+
+-- Loads cached results from string, returns results or nil.
+local function load_cached(cached)
+   local func = utils.load(cached, {})
 
    if not func then
-      return nil, "syntax"
+      return
    end
 
    local ok, res = pcall(func)
 
    if not ok then
-      return nil, "runtime"
+      return
    end
 
-   return env, res
-end
-
-function utils.array_to_set(array)
-   local set = {}
-
-   for index, value in ipairs(array) do
-      set[value] = index
+   if type(res) ~= "table" then
+      return
    end
 
-   return set
+   local decompressed = {}
+
+   for i, event in ipairs(res) do
+      if type(event) ~= "table" then
+         return
+      end
+
+      decompressed[i] = decompress(event)
+   end
+
+   return decompressed
 end
 
-function utils.concat_arrays(array)
-   local res = {}
+local function check_version_header(fh)
+   return fh:read() == "" and tonumber(fh:read()) == cache.format_version
+end
 
-   for _, subarray in ipairs(array) do
-      for _, item in ipairs(subarray) do
-         table.insert(res, item)
+local function write_version_header(fh)
+   fh:write("\n", tostring(cache.format_version), "\n")
+end
+
+-- Loads cache for filenames given mtimes from cache cache_filename.
+-- Returns table mapping filenames to cached check results.
+-- On corrupted cache returns nil, on version mismatch returns {}.
+function cache.load(cache_filename, filenames, mtimes)
+   local fh = io.open(cache_filename, "rb")
+
+   if not fh then
+      return {}
+   end
+
+   if not check_version_header(fh) then
+      fh:close()
+      return {}
+   end
+
+   local result = {}
+   local not_yet_found = utils.array_to_set(filenames)
+
+   while next(not_yet_found) do
+      local filename = fh:read()
+
+      if not filename then
+         fh:close()
+         return result
+      end
+
+      local mtime = fh:read()
+      local cached = fh:read()
+
+      if not mtime or not cached then
+         fh:close()
+         return
+      end
+
+      mtime = tonumber(mtime)
+
+      if not mtime then
+         fh:close()
+         return
+      end
+
+      if not_yet_found[filename] then
+         if mtimes[not_yet_found[filename]] == mtime then
+            result[filename] = load_cached(cached)
+
+            if result[filename] == nil then
+               fh:close()
+               return
+            end
+         end
+
+         not_yet_found[filename] = nil
       end
    end
 
-   return res
+   fh:close()
+   return result
 end
 
-function utils.update(t1, t2)
-   for k, v in pairs(t2) do
-      t1[k] = v
+-- Updates cache at cache_filename with results for filenames.
+-- Returns success flag + whether update was append-only.
+function cache.update(cache_filename, filenames, mtimes, results)
+   local old_triplets = {}
+   local can_append = false
+   local fh = io.open(cache_filename, "rb")
+
+   if fh then
+      if check_version_header(fh) then
+         old_triplets = read_triplets(fh)
+         can_append = true
+      end
+
+      fh:close()
    end
 
-   return t1
-end
+   local filename_set = utils.array_to_set(filenames)
+   local old_filename_set = {}
 
-local class_metatable = {}
+   -- Update old cache for files which got a new result.
+   for i, triplet in ipairs(old_triplets) do
+      old_filename_set[triplet[1]] = true
+      local file_index = filename_set[triplet[1]]
 
-function class_metatable.__call(class, ...)
-   local obj = setmetatable({}, class)
-
-   if class.__init then
-      class.__init(obj, ...)
+      if file_index then
+         can_append = false
+         old_triplets[i][2] = mtimes[file_index]
+         old_triplets[i][3] = cache.serialize(results[file_index])
+      end
    end
 
-   return obj
-end
+   local new_triplets = {}
 
-function utils.class()
-   local class = setmetatable({}, class_metatable)
-   class.__index = class
-   return class
-end
+   for _, filename in ipairs(filenames) do
+      -- Use unique index (there could be duplicate filenames).
+      local file_index = filename_set[filename]
 
-utils.Stack = utils.class()
-
-function utils.Stack:__init()
-   self.size = 0
-end
-
-function utils.Stack:push(value)
-   self.size = self.size + 1
-   self[self.size] = value
-   self.top = value
-end
-
-function utils.Stack:pop()
-   local value = self[self.size]
-   self[self.size] = nil
-   self.size = self.size - 1
-   self.top = self[self.size]
-   return value
-end
-
-local function error_handler(err)
-   return {
-      err = err,
-      traceback = debug.traceback()
-   }
-end
-
--- Calls f with arg, returns what it does.
--- If f throws a table, returns nil, the table.
--- If f throws not a table, rethrows.
-function utils.pcall(f, arg)
-   local function task()
-      return f(arg)
+      if file_index and not old_filename_set[filename] then
+         table.insert(new_triplets, {
+            filename,
+            mtimes[file_index],
+            cache.serialize(results[file_index])
+         })
+         -- Do not save result for this filename again.
+         filename_set[filename] = nil
+      end
    end
 
-   local ok, res = xpcall(task, error_handler)
+   if can_append then
+      if #new_triplets > 0 then
+         fh = io.open(cache_filename, "ab")
 
-   if ok then
-      return res
-   elseif type(res.err) == "table" then
-      return nil, res.err
+         if not fh then
+            return false
+         end
+
+         write_triplets(fh, new_triplets)
+         fh:close()
+      end
    else
-      error(tostring(res.err) .. "\n" .. res.traceback, 0)
-   end
-end
+      fh = io.open(cache_filename, "wb")
 
-local function ripairs_iterator(array, i)
-   if i == 1 then
-      return nil
-   else
-      i = i - 1
-      return i, array[i]
-   end
-end
-
-function utils.ripairs(array)
-   return ripairs_iterator, array, #array + 1
-end
-
-function utils.after(str, pattern)
-   local _, last_matched_index = str:find(pattern)
-
-   if last_matched_index then
-      return str:sub(last_matched_index + 1)
-   end
-end
-
-function utils.strip(str)
-   local _, last_start_space = str:find("^%s*")
-   local first_end_space = str:find("%s*$")
-   return str:sub(last_start_space + 1, first_end_space - 1)
-end
-
--- `sep` must be nil or a single character. Behaves like python's `str.split`.
-function utils.split(str, sep)
-   local parts = {}
-   local pattern
-
-   if sep then
-      pattern = sep .. "([^" .. sep .. "]*)"
-      str = sep .. str
-   else
-      pattern = "%S+"
-   end
-
-   for part in str:gmatch(pattern) do
-      table.insert(parts, part)
-   end
-
-   return parts
-end
-
--- Behaves like string.match, except it normally returns boolean and
--- throws a table {pattern = pattern} on invalid pattern.
--- The error message turns into original error when tostring is used on it,
--- to ensure behaviour is predictable when luacheck is used as a module.
-function utils.pmatch(str, pattern)
-   assert(type(str) == "string")
-   assert(type(pattern) == "string")
-
-   local ok, res = pcall(string.match, str, pattern)
-
-   if not ok then
-      error(setmetatable({pattern = pattern}, {__tostring = function() return res end}))
-   else
-      return not not res
-   end
-end
-
--- Maps func over array.
-function utils.map(func, array)
-   local res = {}
-
-   for i, item in ipairs(array) do
-      res[i] = func(item)
-   end
-
-   return res
-end
-
--- Returns predicate checking type.
-function utils.has_type(type_)
-   return function(x)
-      return type(x) == type_
-   end
-end
-
--- Returns predicate checking that value is an array with
--- elements of type.
-function utils.array_of(type_)
-   return function(x)
-      if type(x) ~= "table" then
+      if not fh then
          return false
       end
 
-      for _, item in ipairs(x) do
-         if type(item) ~= type_ then
-            return false
-         end
-      end
-
-      return true
+      write_version_header(fh)
+      write_triplets(fh, old_triplets)
+      write_triplets(fh, new_triplets)
+      fh:close()
    end
+
+   return true, can_append
 end
 
--- Returns predicate chacking if value satisfies on of predicates.
-function utils.either(pred1, pred2)
-   return function(x)
-      return pred1(x) or pred2(x)
-   end
-end
-
-return utils
+return cache
 ]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.argparse"])sources["luacheck.argparse"]=([===[-- <pack luacheck.argparse> --
+assert(not sources["luacheck.argparse"],"module already exists")sources["luacheck.argparse"]=([===[-- <pack luacheck.argparse> --
 local function deep_update(t1, t2)
    for k, v in pairs(t2) do
       if type(v) == "table" then
@@ -6509,480 +6759,239 @@ return function(...)
    return Parser(default_cmdline[0]):add_help(true)(...)
 end
 ]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck.cache"])sources["luacheck.cache"]=([===[-- <pack luacheck.cache> --
-local utils = require "luacheck.utils"
+assert(not sources["luacheck.analyze"],"module already exists")sources["luacheck.analyze"]=([===[-- <pack luacheck.analyze> --
+local core_utils = require "luacheck.core_utils"
 
-local cache = {}
-
--- Cache file contains check results for n unique filenames.
--- Cache file consists of 3n+2 lines, the first line is empty and the second is cache format version.
--- The rest are contain file records, 3 lines per file.
--- For each file, first line is the filename, second is modification time,
--- third is check result in lua table format.
--- String fields are compressed into array indexes.
-
-cache.format_version = 1
-
-local fields = {
-   "code", "name", "line", "column", "end_column", "prev_line", "prev_column", "secondary",
-   "self", "func", "filtered", "top", "read_only", "global", "filtered_111", "filtered_121",
-   "filtered_131", "filtered_112", "filtered_122", "filtered_113","definition", "in_module", "msg"
-}
-
--- Converts table with fields into table with indexes.
-local function compress(t)
-   local res = {}
-
-   for index, field in ipairs(fields) do
-      res[index] = t[field]
+local function register_value(values_per_var, var, value)
+   if not values_per_var[var] then
+      values_per_var[var] = {}
    end
 
-   return res
+   table.insert(values_per_var[var], value)
 end
 
-local function get_local_name(index)
-   return string.char(index + (index > 26 and 70 or 64))
+local function add_resolution(item, var, value)
+   register_value(item.used_values, var, value)
+   value.used = true
+
+   if value.secondaries then
+      value.secondaries.used = true
+   end
 end
 
--- Serializes event into buffer.
--- strings is a table mapping string values to where they first occured or to name of local
--- variable used to represent it.
--- Array part contains representations of values saved into locals.
-local function serialize_event(buffer, strings, event)
-   event = compress(event)
-   table.insert(buffer, "{")
-   local is_sparse
-   local put_one
+local function in_scope(var, index)
+   return (var.scope_start <= index) and (index <= var.scope_end)
+end
 
-   for i = 1, #fields do
-      local value = event[i]
-
-      if not value then
-         is_sparse = true
-      else
-         if put_one then
-            table.insert(buffer, ",")
-         end
-
-         put_one = true
-
-         if is_sparse then
-            table.insert(buffer, ("[%d]="):format(i))
-         end
-
-         if type(value) == "string" then
-            local prev = strings[value]
-
-            if type(prev) == "string" then
-               -- There is a local with such value.
-               table.insert(buffer, prev)
-            elseif type(prev) == "number" and #strings < 52 then
-               -- Value is used second time, put it into a local.
-               table.insert(strings, ("%q"):format(value))
-               local local_name = get_local_name(#strings)
-               buffer[prev] = local_name
-               table.insert(buffer, local_name)
-               strings[value] = local_name
-            else
-               table.insert(buffer, ("%q"):format(value))
-               strings[value] = #buffer
-            end
-         else
-            table.insert(buffer, tostring(value))
-         end
-      end
+-- Called when value of var is live at an item, maybe several times.
+-- Registers value as live where variable is accessed or liveness propogation stops.
+-- Stops when out of scope of variable, at another assignment to it or at an item
+-- encountered already.
+-- When stopping at a visited item, only save value if the item is in the current stack
+-- of items, i.e. when propogation followed some path from it to previous item
+local function value_propogation_callback(line, stack, index, item, visited, var, value)
+   if not item then
+      register_value(line.last_live_values, var, value)
+      return true
    end
 
-   table.insert(buffer, "}")
-end
+   if not visited[index] and item.accesses and item.accesses[var] then
+      add_resolution(item, var, value)
+   end
 
--- Serializes check result into a string.
-function cache.serialize(events)
-   local strings = {}
-   local buffer = {"", "return {"}
-
-   for i, event in ipairs(events) do
-      if i > 1 then
-         table.insert(buffer, ",")
+   if stack[index] or (not visited[index] and (not in_scope(var, index) or item.set_variables and item.set_variables[var])) then
+      if not item.live_values then  
+         item.live_values = {}    
       end
 
-      serialize_event(buffer, strings, event)
+      register_value(item.live_values, var, value)  
+      return true
    end
 
-   table.insert(buffer, "}")
-
-   if strings[1] then
-      local names = {}
-
-      for index in ipairs(strings) do
-         table.insert(names, get_local_name(index))
-      end
-
-      buffer[1] = "local " .. table.concat(names, ",") .. "=" .. table.concat(strings, ",") .. ";"
+   if visited[index] then
+      return true
    end
 
-   return table.concat(buffer)
+   visited[index] = true
 end
 
--- Returns array of triplets of lines from cache fh.
-local function read_triplets(fh)
-   local res = {}
+-- For each node accessing variables, adds table {var = {values}} to field `used_values`.
+-- A pair `var = {values}` in this table means that accessed local variable `var` can contain one of values `values`.
+-- Values that can be accessed locally are marked as used.
+local function propogate_values(line)
+   -- {var = values} live at the end of line.   
+   line.last_live_values = {}
 
-   while true do
-      local filename = fh:read()
-
-      if filename then
-         local mtime = fh:read() or ""
-         local cached = fh:read() or ""
-         table.insert(res, {filename, mtime, cached})
-      else
-         break
-      end
-   end
-
-   return res
-end
-
--- Writes cache triplets into fh.
-local function write_triplets(fh, triplets)
-   for _, triplet in ipairs(triplets) do
-      fh:write(triplet[1], "\n")
-      fh:write(triplet[2], "\n")
-      fh:write(triplet[3], "\n")
-   end
-end
-
--- Converts table with indexes into table with fields.
-local function decompress(t)
-   local res = {}
-
-   for index, field in ipairs(fields) do
-      res[field] = t[index]
-   end
-
-   return res
-end
-
--- Loads cached results from string, returns results or nil.
-local function load_cached(cached)
-   local func = utils.load(cached, {})
-
-   if not func then
-      return
-   end
-
-   local ok, res = pcall(func)
-
-   if not ok then
-      return
-   end
-
-   if type(res) ~= "table" then
-      return
-   end
-
-   local decompressed = {}
-
-   for i, event in ipairs(res) do
-      if type(event) ~= "table" then
-         return
-      end
-
-      decompressed[i] = decompress(event)
-   end
-
-   return decompressed
-end
-
-local function check_version_header(fh)
-   return fh:read() == "" and tonumber(fh:read()) == cache.format_version
-end
-
-local function write_version_header(fh)
-   fh:write("\n", tostring(cache.format_version), "\n")
-end
-
--- Loads cache for filenames given mtimes from cache cache_filename.
--- Returns table mapping filenames to cached check results.
--- On corrupted cache returns nil, on version mismatch returns {}.
-function cache.load(cache_filename, filenames, mtimes)
-   local fh = io.open(cache_filename, "rb")
-
-   if not fh then
-      return {}
-   end
-
-   if not check_version_header(fh) then
-      fh:close()
-      return {}
-   end
-
-   local result = {}
-   local not_yet_found = utils.array_to_set(filenames)
-
-   while next(not_yet_found) do
-      local filename = fh:read()
-
-      if not filename then
-         fh:close()
-         return result
-      end
-
-      local mtime = fh:read()
-      local cached = fh:read()
-
-      if not mtime or not cached then
-         fh:close()
-         return
-      end
-
-      mtime = tonumber(mtime)
-
-      if not mtime then
-         fh:close()
-         return
-      end
-
-      if not_yet_found[filename] then
-         if mtimes[not_yet_found[filename]] == mtime then
-            result[filename] = load_cached(cached)
-
-            if result[filename] == nil then
-               fh:close()
-               return
+   -- It is not very clever to simply propogate every single assigned value.
+   -- Fortunately, performance hit seems small (can be compenstated by inlining a few functions in lexer).
+   for i, item in ipairs(line.items) do
+      if item.set_variables then
+         for var, value in pairs(item.set_variables) do
+            if var.line == line then
+               -- Values are only live at the item after assignment.
+               core_utils.walk_line(line, i + 1, value_propogation_callback, {}, var, value)
             end
          end
-
-         not_yet_found[filename] = nil
       end
    end
-
-   fh:close()
-   return result
 end
 
--- Updates cache at cache_filename with results for filenames.
--- Returns success flag + whether update was append-only.
-function cache.update(cache_filename, filenames, mtimes, results)
-   local old_triplets = {}
-   local can_append = false
-   local fh = io.open(cache_filename, "rb")
+-- Called when closure (subline) is live at index.
+-- Updates variable resolution:
+-- When a closure accessing upvalue is live at item where a value of the variable is live,
+-- the access can resolve to the value.
+-- When a closure setting upvalue is live at item where the variable is accessed,
+-- the access can resolve to the value.
+-- Live values are only stored when their liveness ends. However, as closure propogation is unrestricted,
+-- if there is an intermediate item where value is factually live and closure is live, closure will at some
+-- point be propogated to where value liveness ends and is stored as live.
+-- (Chances that I will understand this comment six months later: non-existent)
+local function closure_propogation_callback(line, _, item, subline)
+   local live_values    
 
-   if fh then
-      if check_version_header(fh) then
-         old_triplets = read_triplets(fh)
-         can_append = true
-      end
-
-      fh:close()
+   if not item then
+      live_values = line.last_live_values
+   else   
+      live_values = item.live_values
    end
 
-   local filename_set = utils.array_to_set(filenames)
-   local old_filename_set = {}
-
-   -- Update old cache for files which got a new result.
-   for i, triplet in ipairs(old_triplets) do
-      old_filename_set[triplet[1]] = true
-      local file_index = filename_set[triplet[1]]
-
-      if file_index then
-         can_append = false
-         old_triplets[i][2] = mtimes[file_index]
-         old_triplets[i][3] = cache.serialize(results[file_index])
-      end
-   end
-
-   local new_triplets = {}
-
-   for _, filename in ipairs(filenames) do
-      -- Use unique index (there could be duplicate filenames).
-      local file_index = filename_set[filename]
-
-      if file_index and not old_filename_set[filename] then
-         table.insert(new_triplets, {
-            filename,
-            mtimes[file_index],
-            cache.serialize(results[file_index])
-         })
-         -- Do not save result for this filename again.
-         filename_set[filename] = nil
-      end
-   end
-
-   if can_append then
-      if #new_triplets > 0 then
-         fh = io.open(cache_filename, "ab")
-
-         if not fh then
-            return false
+   if live_values then
+      for var, accessing_items in pairs(subline.accessed_upvalues) do
+         if var.line == line then
+            if live_values[var] then
+               for _, accessing_item in ipairs(accessing_items) do
+                  for _, value in ipairs(live_values[var]) do
+                     add_resolution(accessing_item, var, value)
+                  end
+               end
+            end
          end
-
-         write_triplets(fh, new_triplets)
-         fh:close()
       end
+   end
+
+   if not item then
+      return true
+   end
+
+   if item.accesses then
+      for var, setting_items in pairs(subline.set_upvalues) do
+         if var.line == line then
+            if item.accesses[var] then
+               for _, setting_item in ipairs(setting_items) do
+                  add_resolution(item, var, setting_item.set_variables[var])
+               end
+            end
+         end
+      end
+   end
+end
+
+-- Updates variable resolution to account for closures and upvalues.
+local function propogate_closures(line)
+   for i, item in ipairs(line.items) do
+      if item.lines then
+         for _, subline in ipairs(item.lines) do
+            -- Closures are considered live at the item they are created.
+            core_utils.walk_line_once(line, {}, i, closure_propogation_callback, subline)
+         end
+      end
+   end
+
+   -- It is assumed that all closures are live at the end of the line.
+   -- Therefore, all accesses and sets inside closures can resolve to each other.
+   for _, subline in ipairs(line.lines) do
+      for var, accessing_items in pairs(subline.accessed_upvalues) do
+         if var.line == line then
+            for _, accessing_item in ipairs(accessing_items) do
+               for _, another_subline in ipairs(line.lines) do
+                  if another_subline.set_upvalues[var] then
+                     for _, setting_item in ipairs(another_subline.set_upvalues[var]) do
+                        add_resolution(accessing_item, var, setting_item.set_variables[var])
+                     end
+                  end
+               end
+            end
+         end
+      end
+   end
+end
+
+local function analyze_line(line)
+   propogate_values(line)
+   propogate_closures(line)
+end
+
+-- Emits warnings for variable.
+local function check_var(chstate, var)
+   if #var.values == 1 then
+      if not var.values[1].used then
+         chstate:warn_unused_variable(var)
+      elseif var.values[1].empty then
+         var.empty = true
+         chstate:warn_unset(var)
+      end
+   elseif not var.accessed then
+      chstate:warn_unaccessed(var)
    else
-      fh = io.open(cache_filename, "wb")
-
-      if not fh then
-         return false
-      end
-
-      write_version_header(fh)
-      write_triplets(fh, old_triplets)
-      write_triplets(fh, new_triplets)
-      fh:close()
-   end
-
-   return true, can_append
-end
-
-return cache
-]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-assert(not sources["luacheck"])sources["luacheck"]=([===[-- <pack luacheck> --
-local check = require "luacheck.check"
-local filter = require "luacheck.filter"
-local options = require "luacheck.options"
-local format = require "luacheck.format"
-local utils = require "luacheck.utils"
-
-local luacheck = {
-   _VERSION = "0.11.1"
-}
-
-local function raw_validate_options(fname, opts)
-   assert(opts == nil or type(opts) == "table",
-      ("bad argument #2 to '%s' (table or nil expected, got %s)"):format(fname, type(opts))
-   )
-
-   local ok, invalid_field = options.validate(options.all_options, opts)
-
-   if not ok then
-      if invalid_field then
-         error(("bad argument #2 to '%s' (invalid value of option '%s')"):format(fname, invalid_field))
-      else
-         error(("bad argument #2 to '%s'"):format(fname))
+      for _, value in ipairs(var.values) do
+         if (not value.used) and (not value.empty) then
+            chstate:warn_unused_value(value)
+         end
       end
    end
 end
 
-local function validate_options(fname, items, opts)
-   raw_validate_options(fname, opts)
-
-   if opts ~= nil then
-      for i in ipairs(items) do
-         raw_validate_options(fname, opts[i])
-
-         if opts[i] ~= nil then
-            for _, nested_opts in ipairs(opts[i]) do
-               raw_validate_options(fname, nested_opts)
+-- Emits warnings for unused variables and values and unset variables in line.
+local function check_for_warnings(chstate, line)
+   for _, item in ipairs(line.items) do
+      if item.tag == "Local" then
+         for var in pairs(item.set_variables) do
+            -- Do not check implicit top level vararg.
+            if var.location then
+               check_var(chstate, var)
             end
          end
       end
    end
 end
 
--- Returns report for a string. Report is an array of warnings and errors.
-function luacheck.get_report(src)
-   assert(type(src) == "string", ("bad argument #1 to 'luacheck.get_report' (string expected, got %s)"):format(type(src)))
-   return check(src)
-end
+-- Finds reaching assignments for all variable accesses.
+-- Emits warnings: unused variable, unused value, unset variable.
+local function analyze(chstate, line)
+   analyze_line(line)
 
--- Applies options to reports. Reports with .fatal field are unchanged.
--- Options are applied to reports[i] in order: options, options[i], options[i][1], options[i][2], ...
--- Returns new array of reports, adds .warnings, .errors and .fatals fields to this array.
-function luacheck.process_reports(reports, opts)
-   assert(type(reports) == "table", ("bad argument #1 to 'luacheck.process_reports' (table expected, got %s)"):format(type(reports)))
-   validate_options("luacheck.process_reports", reports, opts)
-   local report = filter.filter(reports, opts)
-   report.warnings = 0
-   report.errors = 0
-   report.fatals = 0
-
-   for _, file_report in ipairs(report) do
-      if file_report.fatal then
-         report.fatals = report.fatals + 1
-      else
-         for _, event in ipairs(file_report) do
-            if event.code:sub(1, 1) == "0" then
-               report.errors = report.errors + 1
-            else
-               report.warnings = report.warnings + 1
-            end
-         end
-      end
+   for _, nested_line in ipairs(line.lines) do
+      analyze_line(nested_line)
    end
 
-   return report
+   check_for_warnings(chstate, line)
+
+   for _, nested_line in ipairs(line.lines) do
+      check_for_warnings(chstate, nested_line)
+   end
 end
 
--- Checks strings with options, returns report.
--- Tables with .fatal field are unchanged.
-function luacheck.check_strings(srcs, opts)
-   assert(type(srcs) == "table", ("bad argument #1 to 'luacheck.check_strings' (table expected, got %s)"):format(type(srcs)))
-
-   for _, item in ipairs(srcs) do
-      assert(type(item) == "string" or type(item) == "table", (
-         "bad argument #1 to 'luacheck.check_strings' (array of strings or tables expected, got %s)"):format(type(item))
-      )
-   end
-
-   validate_options("luacheck.check_strings", srcs, opts)
-
-   local reports = {}
-
-   for i, src in ipairs(srcs) do
-      if type(src) == "table" and src.fatal then
-         reports[i] = src
-      else
-         reports[i] = luacheck.get_report(src)
-      end
-   end
-
-   return luacheck.process_reports(reports, opts)
-end
-
-function luacheck.check_files(files, opts)
-   assert(type(files) == "table", ("bad argument #1 to 'luacheck.check_files' (table expected, got %s)"):format(type(files)))
-
-   for _, item in ipairs(files) do
-      assert(type(item) == "string" or io.type(item) == "file", (
-         "bad argument #1 to 'luacheck.check_files' (array of paths or file handles expected, got %s)"):format(type(item))
-      )
-   end
-
-   validate_options("luacheck.check_files", files, opts)
-
-   local srcs = {}
-
-   for i, file in ipairs(files) do
-      srcs[i] = utils.read_file(file) or {fatal = "I/O"}
-   end
-
-   return luacheck.check_strings(srcs, opts)
-end
-
-function luacheck.get_message(issue)
-   assert(type(issue) == "table", ("bad argument #1 to 'luacheck.get_message' (table expected, got %s)"):format(type(issue)))
-   return format.get_message(issue)
-end
-
-setmetatable(luacheck, {__call = function(_, ...)
-   return luacheck.check_files(...)
-end})
-
-return luacheck
+return analyze
 ]===]):gsub('\\([%]%[]===)\\([%]%[])','%1%2')
-local add
-if not pcall(function() add = require"aioruntime".add end) then
-        local loadstring=_G.loadstring or _G.load; local preload = require"package".preload
-        add = function(name, rawcode)
-		if not preload[name] then
-		        preload[name] = function(...) return assert(loadstring(rawcode), "loadstring: "..name.." failed")(...) end
-		else
-			print("WARNING: overwrite "..name)
-		end
-        end
+local loadstring=_G.loadstring or _G.load; local preload = require"package".preload
+local add = function(name, rawcode)
+	if not preload[name] then
+	        preload[name] = function(...) return assert(loadstring(rawcode), "loadstring: "..name.." failed")(...) end
+	else
+		print("WARNING: overwrite "..name)
+	end
 end
 for name, rawcode in pairs(sources) do add(name, rawcode, priorities[name]) end
-end;
+end; --}};
+do -- preload auto aliasing...
+	local p = require("package").preload
+	for k,v in pairs(p) do
+		if k:find("%.init$") then
+			local short = k:gsub("%.init$", "")
+			if not p[short] then
+				p[short] = v
+			end
+		end
+	end
+end
 require "luacheck.main"
